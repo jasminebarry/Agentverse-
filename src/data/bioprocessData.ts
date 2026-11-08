@@ -607,6 +607,21 @@ export const DEFAULT_HF_PHYSICS: HollowFibrePhysicsParams = {
   inletDoPercent: 85,
   oxygenEnrichmentFraction: 0.60,
   ecsCellDensityE6PerMl: 85.0,
+  retentionMode: 'atf_alternating',
+  parallelCartridgesCount: 1,
+};
+
+export const FEASIBLE_500L_HF_PHYSICS: HollowFibrePhysicsParams = {
+  cartridgeVolumeL: 12.0,
+  fibreInnerDiameterUm: 340,
+  fibreLengthM: 0.28,
+  numberOfFibres: 15500,
+  recirculationFlowLMin: 6.0,
+  inletDoPercent: 85,
+  oxygenEnrichmentFraction: 0.60,
+  ecsCellDensityE6PerMl: 85.0,
+  retentionMode: 'atf_alternating',
+  parallelCartridgesCount: 1,
 };
 
 export const DEFAULT_DOWNSTREAM_ECONOMICS: DownstreamEconomicParams = {

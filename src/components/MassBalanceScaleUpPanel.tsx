@@ -1849,18 +1849,20 @@ export const MassBalanceScaleUpPanel: React.FC<MassBalanceScaleUpPanelProps> = (
             </div>
 
             <div className="p-3 bg-slate-50 border border-slate-200">
-              <span className="text-slate-500 block text-[10px]">WALL SHEAR τ_w</span>
+              <span className="text-slate-500 block text-[10px]">
+                LAMINAR WALL SHEAR τ_w (≤ {physics.hfLumenWallShearLimitPa.toFixed(2)} Pa)
+              </span>
               <span
                 className={`text-base font-bold ${
-                  physics.hfWallShearStressPa <= groundedParams.shearThresholdPa
+                  !physics.isHfWallShearViolated
                     ? 'text-emerald-700'
                     : 'text-rose-700'
                 }`}
               >
-                {physics.hfWallShearStressPa.toFixed(2)} Pa
+                {physics.hfEffectiveWallShearStressPa.toFixed(2)} Pa
               </span>
               <span className="text-[11px] text-slate-500 block">
-                γ_w = {physics.hfWallShearRatePerS} s⁻¹
+                γ_w = {physics.hfWallShearRatePerS} s⁻¹ ({physics.hfWallShearLoadPct.toFixed(0)}% load)
               </span>
             </div>
 

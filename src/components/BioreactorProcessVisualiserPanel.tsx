@@ -237,10 +237,7 @@ export const BioreactorProcessVisualiserPanel: React.FC<
   const isMixingNearLimit =
     !isMixingSlow && physics.mixingTimeGassedS > 45.0;
 
-  const isHfViolated =
-    physics.hfPressureDropKpa > 35.0 ||
-    physics.hfWallShearStressPa > groundedParams.shearThresholdPa ||
-    physics.hfAxialOxygenDepleted;
+  const isHfViolated = physics.isHfHydraulicsViolated;
   const isHfNearLimit =
     !isHfViolated && currentRadar.filterHydraulicsLoadPct >= 75.0;
 
@@ -1285,10 +1282,10 @@ export const BioreactorProcessVisualiserPanel: React.FC<
                     : `✓ 4. FILTER HYDRAULICS OK (${currentRadar.filterHydraulicsLoadPct.toFixed(0)}%)`}
                 </text>
                 <text x="8" y="32" fill="#f8fafc" fontSize="9" fontFamily="IBM Plex Mono, monospace">
-                  Lumen ΔP = {physics.hfPressureDropKpa.toFixed(1)} kPa (≤ 35.0 kPa)
+                  Lumen ΔP = {physics.hfPressureDropKpa.toFixed(1)} kPa (≤ {physics.hfPressureDropLimitKpa.toFixed(1)} kPa)
                 </text>
                 <text x="8" y="47" fill="#cbd5e1" fontSize="8.5" fontFamily="IBM Plex Mono, monospace">
-                  Wall τ_w = {physics.hfWallShearStressPa.toFixed(2)} Pa (≤ {groundedParams.shearThresholdPa} Pa)
+                  Laminar Wall τ_w = {physics.hfEffectiveWallShearStressPa.toFixed(2)} Pa (≤ {physics.hfLumenWallShearLimitPa.toFixed(2)} Pa)
                 </text>
                 <text x="8" y="62" fill="#94a3b8" fontSize="8.5" fontFamily="IBM Plex Mono, monospace">
                   d_f = {hfParams.fibreInnerDiameterUm} μm · L_f = {hfParams.fibreLengthM.toFixed(2)} m · Q = {hfParams.recirculationFlowLMin.toFixed(1)} L/m

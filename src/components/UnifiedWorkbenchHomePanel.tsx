@@ -24,9 +24,15 @@ import {
 import {
   Atom3D,
   CLOSED_LOOP_DATASETS,
+  ProteinTarget3DConfig,
   PROTEIN_TARGETS_3D,
   getModesForSmiles,
 } from '../data/dissertationDockingData';
+import {
+  DrugTargetKnownBinderIntakeState,
+  INITIAL_DRUG_TARGET_PRESETS,
+  InitialDrugTargetIntakePanel,
+} from './InitialDrugTargetIntakePanel';
 import {
   BiologicCandidate,
   CandidatePathwayMode,
@@ -116,6 +122,10 @@ export const UnifiedWorkbenchHomePanel: React.FC<UnifiedWorkbenchHomePanelProps>
   const [showContactLabels, setShowContactLabels] = useState<boolean>(true);
   const [cameraResetCounter, setCameraResetCounter] = useState<number>(0);
   const [isTechnicalDetailsOpen, setIsTechnicalDetailsOpen] = useState<boolean>(false);
+  const [intakeState, setIntakeState] = useState<DrugTargetKnownBinderIntakeState>(
+    () => INITIAL_DRUG_TARGET_PRESETS.mrp1_mk571_small_molecule
+  );
+  const [customTarget3D, setCustomTarget3D] = useState<ProteinTarget3DConfig | null>(null);
 
   const mountRef = useRef<HTMLDivElement | null>(null);
 
@@ -139,6 +149,9 @@ export const UnifiedWorkbenchHomePanel: React.FC<UnifiedWorkbenchHomePanelProps>
   }, [mrp1LeadCandidate]);
 
   const activeTarget3D = useMemo(() => {
+    if (customTarget3D) {
+      return customTarget3D;
+    }
     if (
       showcaseMode === 'her2_trastuzumab_biologic' ||
       showcaseMode === 'novel_dissertation_protein'
@@ -146,7 +159,7 @@ export const UnifiedWorkbenchHomePanel: React.FC<UnifiedWorkbenchHomePanelProps>
       return PROTEIN_TARGETS_3D.HER2;
     }
     return PROTEIN_TARGETS_3D.MRP1;
-  }, [showcaseMode]);
+  }, [customTarget3D, showcaseMode]);
 
   const activeDockedCandidate = useMemo(() => {
     if (showcaseMode === 'mrp1_unbuildable_raw_hit') {
@@ -156,6 +169,18 @@ export const UnifiedWorkbenchHomePanel: React.FC<UnifiedWorkbenchHomePanelProps>
   }, [showcaseMode, mrp1LeadCandidate, mrp1UnbuildableCandidate]);
 
   const activePoseMode = useMemo(() => {
+    if (customTarget3D) {
+      const smilesToRender =
+        intakeState.activeViewerLigandMode === 'known_binder'
+          ? intakeState.knownBinderSmiles
+          : intakeState.candidateSmiles || activeDockedCandidate.smiles;
+      const affinityToRender =
+        intakeState.activeViewerLigandMode === 'known_binder'
+          ? intakeState.knownBinderAffinityKcalMol
+          : intakeState.candidateAffinityKcalMol;
+      const modes = getModesForSmiles(activeTarget3D, smilesToRender, affinityToRender);
+      return modes[0];
+    }
     if (
       showcaseMode === 'her2_trastuzumab_biologic' ||
       showcaseMode === 'novel_dissertation_protein'
@@ -174,7 +199,7 @@ export const UnifiedWorkbenchHomePanel: React.FC<UnifiedWorkbenchHomePanelProps>
       activeDockedCandidate.dock_affinity
     );
     return modes[0];
-  }, [showcaseMode, activeDockedCandidate]);
+  }, [customTarget3D, intakeState, activeTarget3D, showcaseMode, activeDockedCandidate]);
 
   // Interactive Three.js WebGL 3D Viewer
   useEffect(() => {
@@ -493,6 +518,34 @@ export const UnifiedWorkbenchHomePanel: React.FC<UnifiedWorkbenchHomePanelProps>
           </div>
         </div>
 
+        {/* Initial Drug, Target Protein, 3D Receptor & Known Binder Intake Panel */}
+        <div className="p-6 lg:p-8 border-b border-slate-200 bg-slate-50/70">
+          <InitialDrugTargetIntakePanel
+            intakeState={intakeState}
+            onUpdateIntakeState={setIntakeState}
+            allBiologicCandidates={allBiologicCandidates}
+            onSelectBiologicCandidate={onSelectBiologicCandidate}
+            onChangePathwayMode={onChangePathwayMode}
+            onApplyTo3DViewer={(nextIntake, nextTarget3D) => {
+              setIntakeState(nextIntake);
+              if (nextTarget3D) {
+                setCustomTarget3D(nextTarget3D);
+              }
+              if (nextIntake.pathwayRoute === 'route_a_small_molecule') {
+                setShowcaseMode('mrp1_manufacturable_lead');
+                onChangePathwayMode('small_molecule_chemical');
+              } else {
+                setShowcaseMode('her2_trastuzumab_biologic');
+                onChangePathwayMode('established_biologic');
+                if (nextIntake.linkedBiologicCandidateId) {
+                  onSelectBiologicCandidate(nextIntake.linkedBiologicCandidateId);
+                }
+              }
+              setCameraResetCounter((c) => c + 1);
+            }}
+          />
+        </div>
+
         {/* STAGE 1 — Candidate Discovery & Interactive 3D Molecular Structure Viewer */}
         <div className="p-6 lg:p-8 bg-slate-950 text-slate-100">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-800">
@@ -514,6 +567,7 @@ export const UnifiedWorkbenchHomePanel: React.FC<UnifiedWorkbenchHomePanelProps>
               <button
                 type="button"
                 onClick={() => {
+                  setCustomTarget3D(null);
                   setShowcaseMode('mrp1_manufacturable_lead');
                   onChangePathwayMode('small_molecule_chemical');
                 }}
@@ -528,6 +582,7 @@ export const UnifiedWorkbenchHomePanel: React.FC<UnifiedWorkbenchHomePanelProps>
               <button
                 type="button"
                 onClick={() => {
+                  setCustomTarget3D(null);
                   setShowcaseMode('mrp1_unbuildable_raw_hit');
                   onChangePathwayMode('small_molecule_chemical');
                 }}
@@ -542,6 +597,7 @@ export const UnifiedWorkbenchHomePanel: React.FC<UnifiedWorkbenchHomePanelProps>
               <button
                 type="button"
                 onClick={() => {
+                  setCustomTarget3D(null);
                   setShowcaseMode('her2_trastuzumab_biologic');
                   onChangePathwayMode('established_biologic');
                 }}
@@ -556,6 +612,7 @@ export const UnifiedWorkbenchHomePanel: React.FC<UnifiedWorkbenchHomePanelProps>
               <button
                 type="button"
                 onClick={() => {
+                  setCustomTarget3D(null);
                   setShowcaseMode('novel_dissertation_protein');
                   onChangePathwayMode('novel_dissertation_protein');
                 }}

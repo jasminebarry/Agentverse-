@@ -138,17 +138,25 @@ function buildConstraintAxes(
     vvmMarginPct = 100 - vvmLoadPct;
   }
 
-  // 6. Hollow-Fibre Filter Hydraulics (Upper Bound: DeltaP <= 35 kPa & tau_w <= tau_crit)
-  // Normalisation: Severity % = max(DeltaP / 35, tau_w / tau_crit) * 100.
-  const dpLimit = 35.0;
+  // 6. Hollow-Fibre Filter Hydraulics (Upper Bound: DeltaP <= 35 kPa & tau_w,eff <= 2.50 Pa laminar lumen limit & gamma_w >= min anti-fouling)
+  // Normalisation: Severity % = max(DeltaP / 35, tau_w,eff / 2.50, fouling_load) * 100.
+  const dpLimit = physics.hfPressureDropLimitKpa || 35.0;
+  const tauWLumenLimit = physics.hfLumenWallShearLimitPa || 2.5;
   const dp = physics.hfPressureDropKpa;
-  const tauW = physics.hfWallShearStressPa;
-  const dpLoadPct = (dp / dpLimit) * 100;
-  const tauWLoadPct = (tauW / tauCrit) * 100;
-  const hfLoadPct = Math.max(dpLoadPct, tauWLoadPct, physics.hfAxialOxygenDepleted ? 120 : 0);
+  const tauW = physics.hfEffectiveWallShearStressPa;
+  const dpLoadPct = physics.hfPressureDropLoadPct;
+  const tauWLoadPct = physics.hfWallShearLoadPct;
+  const foulingLoadPct = physics.isHfFoulingVelocityTooLow
+    ? physics.hfFoulingRiskLoadPct
+    : 0;
+  const hfLoadPct = Math.max(
+    dpLoadPct,
+    tauWLoadPct,
+    foulingLoadPct,
+    physics.hfAxialOxygenDepleted ? 120 : 0
+  );
   const hfMarginPct = 100 - hfLoadPct;
-  const hfViolated =
-    dp > dpLimit || tauW > tauCrit || physics.hfAxialOxygenDepleted;
+  const hfViolated = physics.isHfHydraulicsViolated;
 
   return [
     {
@@ -268,24 +276,26 @@ function buildConstraintAxes(
       id: 'hf_lumen_hydraulics',
       shortLabel: 'Filter Hydraulics (ΔP & τ_w)',
       radarLine1: '6. Filter Hydraulics',
-      radarLine2: 'ΔP ≤ 35 kPa',
-      fullTitle: 'Hollow-Fibre Retention Filter Pressure Drop (ΔP) & Wall Shear (τ_w)',
+      radarLine2: `ΔP≤35 kPa · τ_w≤${tauWLumenLimit.toFixed(1)} Pa`,
+      fullTitle: 'Hollow-Fibre Retention Filter Pressure Drop (ΔP), Lumen Wall Shear (τ_w) & Anti-Fouling',
       plainEnglishSummary:
-        'External cell-retention filter pressure drop (ΔP) and fibre wall shear (τ_w) must stay below fouling and lysis limits.',
+        'External cell-retention filter pressure drop (ΔP ≤ 35 kPa), laminar lumen wall shear (τ_w ≤ 2.50 Pa, distinct from 1.65 Pa impeller turbulent shear), and anti-fouling crossflow (γ_w ≥ 800 s⁻¹) must all stay within bounds.',
       boundTypeLabel: 'Upper Bound (≤)',
-      normalisationFormulaLabel: 'max(ΔP/35, τ_w/τ_crit) × 100%',
-      governingCheck: 'ΔP = 128·μ·L·Q / (π·N·d_f⁴) ≤ 35 kPa & τ_w ≤ τ_crit',
-      currentDisplay: `ΔP = ${dp.toFixed(1)} kPa · τ_w = ${tauW.toFixed(2)} Pa`,
-      limitDisplay: `ΔP ≤ 35.0 kPa · τ_w ≤ ${tauCrit.toFixed(2)} Pa`,
-      signedMarginDisplay: `ΔP ${dpLimit - dp >= 0 ? '+' : ''}${(dpLimit - dp).toFixed(1)} kPa`,
+      normalisationFormulaLabel: 'max(ΔP/35, τ_w/2.50) × 100%',
+      governingCheck: `ΔP ≤ 35 kPa · τ_w,lumen ≤ ${tauWLumenLimit.toFixed(2)} Pa · γ_w ≥ ${physics.hfMinAntiFoulingShearRatePerS} s⁻¹`,
+      currentDisplay: `ΔP = ${dp.toFixed(1)} kPa (${dpLoadPct.toFixed(0)}%) · τ_w = ${tauW.toFixed(2)} Pa (${tauWLoadPct.toFixed(0)}%)`,
+      limitDisplay: `ΔP ≤ ${dpLimit.toFixed(1)} kPa · τ_w ≤ ${tauWLumenLimit.toFixed(2)} Pa (laminar lumen)`,
+      signedMarginDisplay: `τ_w ${tauWLumenLimit - tauW >= 0 ? '+' : ''}${(tauWLumenLimit - tauW).toFixed(2)} Pa · ΔP ${dpLimit - dp >= 0 ? '+' : ''}${(dpLimit - dp).toFixed(1)} kPa`,
       signedMarginPercent: hfMarginPct,
       loadPercentOfLimit: hfLoadPct,
       isViolated: hfViolated,
       isNearLimit: !hfViolated && hfLoadPct >= 85,
       failureMechanism:
-        'Narrow fibre inner diameter (d_f^-4 scaling) or excessive recirculation flow elevates transmembrane Starling pressure and wall shear.',
+        physics.hfFailingSubConstraints.length > 0
+          ? physics.hfFailingSubConstraints.join(' ')
+          : 'Narrow fibre inner diameter (τ_w ∝ d_f^-3, ΔP ∝ d_f^-4) or high recirculation flow elevates laminar lumen wall shear and transmembrane Starling pressure.',
       correctiveAction:
-        'Increase hollow-fibre inner diameter d_f (e.g. 200 → 280 μm) or shorten cartridge axial length L_f.',
+        'Increase hollow-fibre inner diameter d_f (e.g. 280 → 340 μm), moderate recirculation flow Q_HF (e.g. 6.5 → 4.8 L/min), or use 2× parallel filter cartridges.',
     },
   ];
 }

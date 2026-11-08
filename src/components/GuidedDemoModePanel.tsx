@@ -38,6 +38,7 @@ import {
   SafetyGateId,
   SafetyGateStatus,
   StirredTankPhysicsParams,
+  CellRetentionFiltrationMode,
 } from '../types/bioreact';
 import {
   DEFAULT_HF_PHYSICS,
@@ -47,6 +48,7 @@ import {
 import {
   CLOSED_LOOP_DATASETS,
   PROTEIN_TARGETS_3D,
+  ProteinTarget3DConfig,
   getModesForSmiles,
 } from '../data/dissertationDockingData';
 import {
@@ -54,8 +56,14 @@ import {
   formatCogsHeadline,
   optimiseUnifiedReactorConfiguration,
   solveMassBalanceAndReactorPhysics,
+  suggestFilterHydraulicImprovements,
 } from '../services/bioprocessEngine';
 import { WorkbenchSectionId } from './UnifiedWorkbenchHomePanel';
+import {
+  DrugTargetKnownBinderIntakeState,
+  INITIAL_DRUG_TARGET_PRESETS,
+  InitialDrugTargetIntakePanel,
+} from './InitialDrugTargetIntakePanel';
 
 export type GuidedDemoStep = 1 | 2 | 3 | 4;
 
@@ -214,7 +222,15 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
   const [showStep3Details, setShowStep3Details] = useState<boolean>(false);
   const [showStep4Details, setShowStep4Details] = useState<boolean>(false);
 
-  // Step 1: 3D Viewer & Candidate Showcase State
+  // Step 1: Initial Drug, Target Protein, Receptor & Known Binder Intake + 3D Viewer State
+  const [intakeState, setIntakeState] =
+    useState<DrugTargetKnownBinderIntakeState>(() =>
+      candidatePathwayMode === 'small_molecule_chemical'
+        ? INITIAL_DRUG_TARGET_PRESETS.mrp1_mk571_small_molecule
+        : INITIAL_DRUG_TARGET_PRESETS.her2_trastuzumab_biologic
+    );
+  const [customTarget3D, setCustomTarget3D] =
+    useState<ProteinTarget3DConfig | null>(null);
   const [step1Selection, setStep1Selection] = useState<Step1ShowcaseSelection>(
     candidatePathwayMode === 'small_molecule_chemical'
       ? 'route_a_mrp1_lead'
@@ -226,6 +242,15 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
   const [cameraResetTick, setCameraResetTick] = useState<number>(0);
   const viewerMountRef = useRef<HTMLDivElement | null>(null);
 
+  // Step 2: Expandable Cell-Retention Filter Settings & Filter Intervention Suggestions
+  const [showFilterSettingsPanel, setShowFilterSettingsPanel] =
+    useState<boolean>(true);
+  const [showFilterSuggestionsPanel, setShowFilterSuggestionsPanel] =
+    useState<boolean>(false);
+  const [lastAppliedFilterOptId, setLastAppliedFilterOptId] = useState<
+    string | null
+  >(null);
+
   // Step 3: "Ask bioREACT What to Test Next" State
   const [activePresetId, setActivePresetId] =
     useState<ReactorOptimisationObjectivePresetId>('balanced_all_constraints');
@@ -235,6 +260,19 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
   // Step 4: Reviewer Name for Human Approval Gate
   const [reviewerName, setReviewerName] = useState<string>(
     'Simulated Demo Reviewer — Bioprocess Engineer'
+  );
+
+  // Live Filter-Specific Intervention Options (Step 2)
+  const filterSuggestions = useMemo(
+    () =>
+      suggestFilterHydraulicImprovements(
+        strParams,
+        hfParams,
+        groundedParams,
+        groundedParams.optimalVvd,
+        groundedParams.optimalDoPercent
+      ),
+    [strParams, hfParams, groundedParams]
   );
 
   // Baseline 500 L Open-Pipe Air Deficit Reference for Before/After comparison
@@ -304,28 +342,48 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
   }, [mrp1LeadCandidate]);
 
   const activeTarget3D = useMemo(() => {
+    if (customTarget3D) return customTarget3D;
     if (step1Selection === 'route_b_her2_trastuzumab') {
       return PROTEIN_TARGETS_3D.HER2;
     }
     return PROTEIN_TARGETS_3D.MRP1;
-  }, [step1Selection]);
+  }, [step1Selection, customTarget3D]);
 
   const activePoseModes = useMemo(() => {
-    if (step1Selection === 'route_b_her2_trastuzumab') {
+    if (step1Selection === 'route_a_mrp1_failed_hit') {
       return getModesForSmiles(
-        PROTEIN_TARGETS_3D.HER2,
-        PROTEIN_TARGETS_3D.HER2.referenceLigandSmiles,
-        PROTEIN_TARGETS_3D.HER2.referenceAffinityKcalMol
+        activeTarget3D,
+        mrp1FailedHit.smiles,
+        mrp1FailedHit.dock_affinity
       );
     }
-    const entry =
-      step1Selection === 'route_a_mrp1_failed_hit' ? mrp1FailedHit : mrp1LeadCandidate;
+    if (intakeState.activeViewerLigandMode === 'known_binder') {
+      return getModesForSmiles(
+        activeTarget3D,
+        intakeState.knownBinderSmiles || activeTarget3D.referenceLigandSmiles,
+        intakeState.knownBinderAffinityKcalMol
+      );
+    }
+    if (step1Selection === 'route_b_her2_trastuzumab') {
+      return getModesForSmiles(
+        activeTarget3D,
+        intakeState.candidateSmiles || PROTEIN_TARGETS_3D.HER2.referenceLigandSmiles,
+        intakeState.candidateAffinityKcalMol ||
+          PROTEIN_TARGETS_3D.HER2.referenceAffinityKcalMol
+      );
+    }
     return getModesForSmiles(
-      PROTEIN_TARGETS_3D.MRP1,
-      entry.smiles,
-      entry.dock_affinity
+      activeTarget3D,
+      intakeState.candidateSmiles || mrp1LeadCandidate.smiles,
+      intakeState.candidateAffinityKcalMol || mrp1LeadCandidate.dock_affinity
     );
-  }, [step1Selection, mrp1LeadCandidate, mrp1FailedHit]);
+  }, [
+    step1Selection,
+    activeTarget3D,
+    intakeState,
+    mrp1LeadCandidate,
+    mrp1FailedHit,
+  ]);
 
   const currentPose =
     activePoseModes.find((m) => m.mode === selectedPoseMode) || activePoseModes[0];
@@ -525,9 +583,7 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
     physicsResult.estimatedShearStressPa > groundedParams.shearThresholdPa ||
     physicsResult.kolmogorovScaleUm <= 18;
   const isMixingSlow = physicsResult.mixingTimeGassedS > 60;
-  const isFilterViolated =
-    physicsResult.hfPressureDropKpa > 25 ||
-    physicsResult.hfWallShearStressPa > groundedParams.shearThresholdPa;
+  const isFilterViolated = physicsResult.isHfHydraulicsViolated;
   const isAllPhysicsFeasible =
     physicsResult.isScaleUpFeasible &&
     !isO2Starved &&
@@ -731,20 +787,20 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
       </div>
 
       {/* =====================================================================
-          STEP 1 — CHOOSE A MEDICINE
+          STEP 1 — CHOOSE A MEDICINE (INPUT REFERENCE, TARGET, RECEPTOR & KNOWN BINDER)
          ===================================================================== */}
       {activeStep === 1 && (
         <div className="bg-white border border-slate-300 shadow-xs p-5 space-y-4">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-3">
             <div>
               <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-blue-700">
-                STEP 1 OF 4 · CANDIDATE &amp; MANUFACTURING PATHWAY
+                STEP 1 OF 4 · INITIAL DRUG, TARGET PROTEIN, RECEPTOR &amp; KNOWN BINDER INPUT
               </div>
               <h1 className="text-lg font-bold text-slate-900">
-                Step 1 — Choose a Medicine
+                Step 1 — Input Drug via Reference, Target Protein, 3D Receptor &amp; Known Binder
               </h1>
               <p className="text-xs text-slate-600 mt-0.5 max-w-3xl">
-                Inspect the candidate in 3D and verify how it is manufactured. Small-molecule drugs (412 Da) are built via organic chemical synthesis (Route A), whereas large monoclonal antibodies (145.5 kDa) require living CHO mammalian cells in a bioreactor (Route B).
+                Initialise your candidate by specifying the <strong>Literature Reference</strong>, <strong>Target Protein (UniProt)</strong>, <strong>3D Receptor Structure (PDB / .pdb)</strong>, and <strong>Known Binder</strong>. Inspect the binding pocket in 3D and verify whether the drug requires organic chemical synthesis (Route A) or CHO mammalian bioreactor culture (Route B).
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -760,6 +816,7 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                 onClick={() => {
                   onChangePathwayMode('established_biologic');
                   setStep1Selection('route_b_her2_trastuzumab');
+                  setIntakeState(INITIAL_DRUG_TARGET_PRESETS.her2_trastuzumab_biologic);
                   setActiveStep(2);
                 }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-mono font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
@@ -769,6 +826,28 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Initial 4-Pillar Drug Input Interface: Reference + Target Protein + Receptor + Known Binder */}
+          <InitialDrugTargetIntakePanel
+            intakeState={intakeState}
+            onUpdateIntakeState={setIntakeState}
+            allBiologicCandidates={allBiologicCandidates}
+            onSelectBiologicCandidate={onSelectCandidate}
+            onChangePathwayMode={onChangePathwayMode}
+            onApplyTo3DViewer={(nextIntake, customTarget) => {
+              if (customTarget) {
+                setCustomTarget3D(customTarget);
+              } else {
+                setCustomTarget3D(null);
+              }
+              if (nextIntake.pathwayRoute === 'route_b_biologic') {
+                setStep1Selection('route_b_her2_trastuzumab');
+              } else {
+                setStep1Selection('route_a_mrp1_lead');
+              }
+              setSelectedPoseMode(1);
+            }}
+          />
 
           {/* Primary 2-Column Visual & Candidate Profile */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
@@ -780,16 +859,42 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                     type="button"
                     onClick={() => {
                       setStep1Selection('route_a_mrp1_lead');
+                      setIntakeState({
+                        ...INITIAL_DRUG_TARGET_PRESETS.mrp1_mk571_small_molecule,
+                        activeViewerLigandMode: 'designed_candidate',
+                      });
+                      setCustomTarget3D(null);
                       onChangePathwayMode('small_molecule_chemical');
                       setSelectedPoseMode(1);
                     }}
                     className={`px-2.5 py-1 text-[11px] font-mono border cursor-pointer transition-colors ${
-                      step1Selection === 'route_a_mrp1_lead'
+                      step1Selection === 'route_a_mrp1_lead' &&
+                      intakeState.activeViewerLigandMode === 'designed_candidate'
                         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400 font-bold'
                         : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
                     }`}
                   >
                     Route A · MRP1 Lead (−10.82 kcal/mol · PASS)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep1Selection('route_a_mrp1_lead');
+                      setIntakeState({
+                        ...intakeState,
+                        activeViewerLigandMode: 'known_binder',
+                      });
+                      setSelectedPoseMode(1);
+                    }}
+                    className={`px-2.5 py-1 text-[11px] font-mono border cursor-pointer transition-colors ${
+                      intakeState.activeViewerLigandMode === 'known_binder' &&
+                      step1Selection !== 'route_b_her2_trastuzumab'
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-400 font-bold'
+                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                    }`}
+                  >
+                    Known Binder ({intakeState.knownBinderName.split(' ')[0]} ·{' '}
+                    {intakeState.knownBinderAffinityKcalMol.toFixed(1)} kcal/mol)
                   </button>
                   <button
                     type="button"
@@ -810,6 +915,10 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                     type="button"
                     onClick={() => {
                       setStep1Selection('route_b_her2_trastuzumab');
+                      setIntakeState(
+                        INITIAL_DRUG_TARGET_PRESETS.her2_trastuzumab_biologic
+                      );
+                      setCustomTarget3D(null);
                       onChangePathwayMode('established_biologic');
                       onSelectCandidate('trastuzumab');
                       setSelectedPoseMode(1);
@@ -833,19 +942,25 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
               <div className="relative w-full h-[340px] bg-[#090d16]">
                 <div ref={viewerMountRef} className="w-full h-full" />
 
-                {/* Top-Left Target & Pose Overlay */}
-                <div className="absolute top-2.5 left-2.5 bg-slate-950/85 border border-slate-800 px-2.5 py-1.5 text-[11px] font-mono space-y-0.5 pointer-events-none">
-                  <div className="text-sky-300 font-bold">
-                    {step1Selection === 'route_b_her2_trastuzumab'
-                      ? 'Target: Human HER2 / ERBB2 Kinase & Extracellular Domain (UniProt P04626)'
-                      : 'Target: Human MRP1 / ABCC1 Efflux Transporter (UniProt P33527)'}
+                {/* Top-Left Target, Receptor, Reference & Known Binder Overlay */}
+                <div className="absolute top-2.5 left-2.5 bg-slate-950/90 border border-slate-800 px-2.5 py-1.5 text-[11px] font-mono space-y-0.5 pointer-events-none max-w-[92%]">
+                  <div className="text-sky-300 font-bold truncate">
+                    Target: {intakeState.targetProteinSymbol} (UniProt {intakeState.targetUniprotId}) · Receptor PDB: {intakeState.receptorPdbId}
                   </div>
-                  <div className="text-slate-300">
+                  <div className="text-amber-300 truncate">
+                    Known Binder: {intakeState.knownBinderName} ({intakeState.knownBinderKdOrPotency})
+                  </div>
+                  <div className="text-slate-300 truncate">
                     {step1Selection === 'route_b_her2_trastuzumab'
                       ? `Biologic Drug: ${candidate.genericName} (${candidate.brandName}) · 145.5 kDa IgG1 mAb`
                       : step1Selection === 'route_a_mrp1_failed_hit'
-                      ? `Docked Small Molecule: R1-Glycoside-Hit · Vina ${currentPose?.affinityKcalMol.toFixed(2)} kcal/mol (7 Stereocentres — Rejected)`
-                      : `Docked Small Molecule: R2-Lead-1 · Vina ${currentPose?.affinityKcalMol.toFixed(2)} kcal/mol (0 Stereocentres — Buildable)`}
+                      ? `3D Pose: R1-Glycoside-Hit · Vina ${currentPose?.affinityKcalMol.toFixed(2)} kcal/mol (7 Stereocentres — Rejected)`
+                      : intakeState.activeViewerLigandMode === 'known_binder'
+                      ? `3D Pose: Known Binder (${intakeState.knownBinderName}) · Vina ${currentPose?.affinityKcalMol.toFixed(2)} kcal/mol`
+                      : `3D Pose: ${intakeState.candidateName} · Vina ${currentPose?.affinityKcalMol.toFixed(2)} kcal/mol`}
+                  </div>
+                  <div className="text-[10px] text-slate-400 truncate">
+                    Ref: {intakeState.referenceCitation} ({intakeState.referenceAccessionId})
                   </div>
                 </div>
 
@@ -1166,18 +1281,25 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                       “The cells need more oxygen than the reactor can currently deliver.”
                     </span>
                   </>
-                ) : !isAllPhysicsFeasible ? (
+                ) : isShearViolated || isMixingSlow ? (
                   <>
                     <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
                     <span>
-                      “Oxygen supply is met, but shear or mixing constraints are currently exceeded.”
+                      “Oxygen supply is met, but vessel impeller shear or bulk mixing time exceeds safe limits.”
+                    </span>
+                  </>
+                ) : isFilterViolated ? (
+                  <>
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                    <span>
+                      “Bioreactor O₂, impeller shear &amp; mixing pass — but the external Hollow-Fibre Cell-Retention Filter exceeds its laminar wall-shear / hydraulic limit.”
                     </span>
                   </>
                 ) : (
                   <>
                     <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                     <span>
-                      “All 500 L bioreactor constraints pass: oxygen supply exceeds cell demand with safe shear and fast mixing.”
+                      “All 500 L bioreactor and external cell-retention filter constraints pass!”
                     </span>
                   </>
                 )}
@@ -1206,16 +1328,25 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                     </strong>
                     ). Simply spinning the impeller faster damages fragile CHO cells via hydrodynamic shear.
                   </>
+                ) : isFilterViolated && !isShearViolated && !isMixingSlow ? (
+                  <>
+                    <strong>Why bioreactor RPM / O₂ controls didn&apos;t change the filter bar:</strong>{' '}
+                    Vessel oxygen supply (<strong>OTR {physicsResult.otrMmolPerLHour.toFixed(1)} ≥ OUR {physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h</strong>), vessel impeller shear (<strong>{physicsResult.estimatedShearStressPa.toFixed(2)} ≤ {groundedParams.shearThresholdPa} Pa</strong>), and bulk mixing (<strong>{physicsResult.mixingTimeGassedS.toFixed(1)} ≤ 60 s</strong>) all <strong>PASS</strong>. However, the external{' '}
+                    <strong>{(hfParams.retentionMode ?? 'atf_alternating') === 'atf_alternating' ? 'ATF' : 'TFF'} hollow-fibre filtration loop</strong> is a separate hydraulic circuit: while filter pressure drop passes (<strong>ΔP = {physicsResult.hfPressureDropKpa.toFixed(1)} / {physicsResult.hfPressureDropLimitKpa.toFixed(1)} kPa</strong>, {physicsResult.hfPressureDropLoadPct.toFixed(0)}%),{' '}
+                    <strong>{physicsResult.hfFailingSubConstraints.join(' ')}</strong>{' '}
+                    Use the <strong>Cell-Retention Filter Settings</strong> panel below or click <strong>Suggest Filter Improvements</strong> to adjust fibre inner diameter (<code>d_f</code>), recirculation flow (<code>Q_HF</code>), or parallel cartridges.
+                  </>
                 ) : (
                   <>
                     Live 500 L model delivers{' '}
                     <strong>OTR = {physicsResult.otrMmolPerLHour.toFixed(1)} mmol O₂/L/h</strong> vs{' '}
                     <strong>OUR = {physicsResult.ourMmolPerLHour.toFixed(1)} mmol O₂/L/h</strong> (margin{' '}
                     <strong>+{physicsResult.oxygenMarginMmolPerLHour.toFixed(1)} mmol/L/h</strong>), bulk mixing time{' '}
-                    <strong>{physicsResult.mixingTimeGassedS.toFixed(1)} s</strong> (≤ 60 s), impeller shear{' '}
+                    <strong>{physicsResult.mixingTimeGassedS.toFixed(1)} s</strong> (≤ 60 s), turbulent impeller shear{' '}
                     <strong>{physicsResult.estimatedShearStressPa.toFixed(2)} Pa</strong> (≤{' '}
-                    {groundedParams.shearThresholdPa} Pa), and filter ΔP{' '}
-                    <strong>{physicsResult.hfPressureDropKpa.toFixed(1)} kPa</strong> (≤ 25 kPa).
+                    {groundedParams.shearThresholdPa} Pa), filter ΔP{' '}
+                    <strong>{physicsResult.hfPressureDropKpa.toFixed(1)} kPa</strong> (≤ {physicsResult.hfPressureDropLimitKpa.toFixed(0)} kPa), and laminar filter wall shear{' '}
+                    <strong>{physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} Pa</strong> (≤ {physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa).
                   </>
                 )}
               </p>
@@ -1301,17 +1432,29 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                       strokeWidth="3"
                       fill="none"
                     />
-                    <text x="30" y="66" fill="#94a3b8" fontSize="9.5" fontFamily="monospace">
-                      ATF Filter ({hfParams.fibreInnerDiameterUm} μm)
+                    <text x="20" y="66" fill="#94a3b8" fontSize="9.0" fontFamily="monospace">
+                      {(hfParams.retentionMode ?? 'atf_alternating') === 'atf_alternating'
+                        ? 'ATF'
+                        : 'TFF'}{' '}
+                      Filter ({hfParams.fibreInnerDiameterUm} μm · {hfParams.parallelCartridgesCount ?? 1}×)
                     </text>
                     <text
-                      x="30"
-                      y="262"
-                      fill={isFilterViolated ? '#fda4af' : '#6ee7b7'}
-                      fontSize="9.5"
+                      x="20"
+                      y="259"
+                      fill={physicsResult.isHfPressureDropViolated ? '#fda4af' : '#6ee7b7'}
+                      fontSize="9.0"
                       fontFamily="monospace"
                     >
-                      ΔP: {physicsResult.hfPressureDropKpa.toFixed(1)} kPa
+                      ΔP: {physicsResult.hfPressureDropKpa.toFixed(1)}/35 kPa
+                    </text>
+                    <text
+                      x="20"
+                      y="272"
+                      fill={physicsResult.isHfWallShearViolated ? '#fda4af' : '#6ee7b7'}
+                      fontSize="9.0"
+                      fontFamily="monospace"
+                    >
+                      τ_w: {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)}/{physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa
                     </text>
                   </g>
 
@@ -1699,46 +1842,56 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                   </div>
                 </div>
 
-                {/* Live 4-Bar Constraint Load Summary */}
+                {/* Live Constraint Load Summary (Separates Bioreactor vs External Filter Sub-Criteria) */}
                 <div className="bg-white border border-slate-200 p-3 space-y-2">
                   <div className="text-[11px] font-mono font-bold text-slate-800 uppercase">
-                    Live Constraint Load (% of Maximum Safe Limit — ≤ 100% Required)
+                    Live Constraint Load (% of Safe Limit — ≤ 100% Required)
                   </div>
                   {[
                     {
-                      label: 'Oxygen Demand / Supply (OUR/OTR)',
+                      label: 'Oxygen Supply vs. Demand (OTR vs. OUR)',
                       pct: currentRadarLoads.oxygenLoadPct,
-                      val: `${physicsResult.otrMmolPerLHour.toFixed(1)} vs ${physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h`,
+                      val: `OTR ${physicsResult.otrMmolPerLHour.toFixed(1)} vs OUR ${physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h`,
+                      status: isO2Starved ? 'FAIL' : 'PASS',
                     },
                     {
-                      label: 'Impeller Shear Stress (τ / τ_crit)',
+                      label: 'Vessel Impeller Turbulent Shear (τ_imp ≤ 1.65 Pa)',
                       pct: currentRadarLoads.shearLoadPct,
-                      val: `${physicsResult.estimatedShearStressPa.toFixed(2)} / ${groundedParams.shearThresholdPa} Pa`,
+                      val: `${physicsResult.estimatedShearStressPa.toFixed(2)} / ${groundedParams.shearThresholdPa.toFixed(2)} Pa`,
+                      status: isShearViolated ? 'FAIL' : 'PASS',
                     },
                     {
-                      label: 'Gassed Bulk Mixing Time (t_m / 60 s)',
+                      label: 'Gassed Bulk Mixing Time (t_m ≤ 60 s)',
                       pct: currentRadarLoads.mixingLoadPct,
                       val: `${physicsResult.mixingTimeGassedS.toFixed(1)} / 60.0 s`,
+                      status: isMixingSlow ? 'FAIL' : 'PASS',
                     },
                     {
-                      label: 'Hollow-Fibre Filter Hydraulics',
-                      pct: currentRadarLoads.filterHydraulicsLoadPct,
-                      val: `ΔP ${physicsResult.hfPressureDropKpa.toFixed(1)} kPa · τ_w ${physicsResult.hfWallShearStressPa.toFixed(2)} Pa`,
+                      label: 'Filter Lumen Wall Shear (τ_w,HF ≤ 2.50 Pa laminar)',
+                      pct: physicsResult.hfWallShearLoadPct,
+                      val: `${physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} / ${physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa`,
+                      status: physicsResult.isHfWallShearViolated ? 'FAIL' : 'PASS',
+                    },
+                    {
+                      label: 'Filter Axial Pressure Drop (ΔP_HF ≤ 35.0 kPa)',
+                      pct: physicsResult.hfPressureDropLoadPct,
+                      val: `${physicsResult.hfPressureDropKpa.toFixed(1)} / ${physicsResult.hfPressureDropLimitKpa.toFixed(1)} kPa`,
+                      status: physicsResult.isHfPressureDropViolated ? 'FAIL' : 'PASS',
                     },
                   ].map((item) => (
                     <div key={item.label} className="space-y-0.5">
-                      <div className="flex justify-between text-[11px] font-mono">
-                        <span className="text-slate-700">{item.label}</span>
+                      <div className="flex justify-between text-[11px] font-mono gap-1">
+                        <span className="text-slate-700 truncate">{item.label}</span>
                         <span
-                          className={`font-bold ${
+                          className={`font-bold shrink-0 ${
                             item.pct > 100
                               ? 'text-rose-700'
-                              : item.pct > 80
+                              : item.pct > 85
                               ? 'text-amber-700'
                               : 'text-emerald-700'
                           }`}
                         >
-                          {item.val} ({item.pct.toFixed(0)}%)
+                          {item.val} ({item.pct.toFixed(0)}% · {item.status})
                         </span>
                       </div>
                       <div className="w-full h-2 bg-slate-100 overflow-hidden">
@@ -1746,7 +1899,7 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                           className={`h-full transition-all ${
                             item.pct > 100
                               ? 'bg-rose-600'
-                              : item.pct > 80
+                              : item.pct > 85
                               ? 'bg-amber-500'
                               : 'bg-emerald-600'
                           }`}
@@ -1755,18 +1908,572 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                       </div>
                     </div>
                   ))}
+
+                  {/* Filter Anti-Fouling & Axial DO Quick Check */}
+                  <div className="pt-1.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono">
+                    <span
+                      className={
+                        physicsResult.isHfFoulingVelocityTooLow
+                          ? 'text-rose-700 font-bold'
+                          : 'text-slate-600'
+                      }
+                    >
+                      Crossflow γ_w: {physicsResult.hfWallShearRatePerS} s⁻¹ (≥{' '}
+                      {physicsResult.hfMinAntiFoulingShearRatePerS} s⁻¹ anti-fouling:{' '}
+                      {physicsResult.isHfFoulingVelocityTooLow ? 'FAIL — FOULING' : 'PASS'})
+                    </span>
+                    <span
+                      className={
+                        physicsResult.hfAxialOxygenDepleted
+                          ? 'text-rose-700 font-bold'
+                          : 'text-slate-600'
+                      }
+                    >
+                      Filter Outlet DO: {physicsResult.hfOutletDoPercent.toFixed(1)}% (≥ 20%:{' '}
+                      {physicsResult.hfAxialOxygenDepleted ? 'FAIL' : 'PASS'})
+                    </span>
+                  </div>
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowFilterSettingsPanel(true);
+                    setShowFilterSuggestionsPanel(true);
+                  }}
+                  className="py-2 px-3 text-xs font-mono font-bold bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Suggest Filter Improvements</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveStep(3)}
+                  className="py-2 px-3 text-xs font-mono font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <span>Step 3: Full Optimiser →</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* =====================================================================
+              EXPANDABLE CELL-RETENTION FILTER SETTINGS & INTERVENTION PANEL
+             ===================================================================== */}
+          <div
+            className={`border ${
+              isFilterViolated
+                ? 'border-rose-400 bg-rose-50/40'
+                : 'border-slate-300 bg-slate-50/70'
+            }`}
+          >
+            <div className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 bg-white">
               <button
                 type="button"
-                onClick={() => setActiveStep(3)}
-                className="w-full py-2 px-3 text-xs font-mono font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer flex items-center justify-center gap-2"
+                onClick={() => setShowFilterSettingsPanel((v) => !v)}
+                className="flex items-center gap-2 text-left cursor-pointer"
               >
-                <Sparkles className="w-4 h-4" />
-                <span>Step 3: Ask bioREACT What to Test Next →</span>
+                <Sliders className="w-4 h-4 text-indigo-600 shrink-0" />
+                <div>
+                  <div className="text-xs font-mono font-bold uppercase text-slate-900 flex flex-wrap items-center gap-2">
+                    <span>
+                      Cell-Retention Filter Settings (External{' '}
+                      {(hfParams.retentionMode ?? 'atf_alternating') === 'atf_alternating'
+                        ? 'ATF Alternating Diaphragm'
+                        : 'TFF Steady Pump'}{' '}
+                      Circuit)
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 text-[10px] font-mono font-bold ${
+                        isFilterViolated
+                          ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                          : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                      }`}
+                    >
+                      {isFilterViolated
+                        ? `FILTER FAIL — τ_w ${physicsResult.hfEffectiveWallShearStressPa.toFixed(2)}/${physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa (${physicsResult.hfWallShearLoadPct.toFixed(0)}%) · ΔP ${physicsResult.hfPressureDropKpa.toFixed(1)}/35 kPa`
+                        : `FILTER PASS — τ_w ${physicsResult.hfEffectiveWallShearStressPa.toFixed(2)}/${physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa (${physicsResult.hfWallShearLoadPct.toFixed(0)}%) · ΔP ${physicsResult.hfPressureDropKpa.toFixed(1)}/35 kPa`}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-0.5">
+                    Controls the external hollow-fibre perfusion loop (Hagen–Poiseuille lumen hydraulics: ΔP ∝ L_f·Q/(N·d_f⁴), τ_w ∝ Q/(N·d_f³)).
+                  </p>
+                </div>
               </button>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowFilterSettingsPanel(true);
+                    setShowFilterSuggestionsPanel((v) => !v);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-bold bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {showFilterSuggestionsPanel
+                    ? 'Hide Filter Suggestions'
+                    : 'Suggest Filter Improvements (3 Options)'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFilterSettingsPanel((v) => !v)}
+                  className="p-1.5 text-slate-600 hover:bg-slate-100 border border-slate-200 cursor-pointer"
+                  aria-label="Toggle Cell-Retention Filter Settings"
+                >
+                  {showFilterSettingsPanel ? (
+                    <ChevronUp className="w-4 h-4" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
             </div>
+
+            {showFilterSettingsPanel && (
+              <div className="p-4 space-y-4 bg-white">
+                {/* Scientific Distinction Callout: Why 1.65 Pa Impeller Shear != 2.50 Pa Laminar Lumen Wall Shear */}
+                <div className="p-3 bg-slate-900 text-slate-100 border border-slate-800 text-xs space-y-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono font-bold text-sky-400 uppercase text-[11px]">
+                      SCIENTIFIC DISTINCTION · TURBULENT IMPELLER SHEAR (≤ 1.65 Pa) vs. LAMINAR HOLLOW-FIBRE LUMEN SHEAR (≤ 2.50 Pa)
+                    </span>
+                    <span className="font-mono text-[10px] px-2 py-0.5 bg-slate-800 text-slate-300">
+                      Lumen Re = {physicsResult.hfLumenReynoldsNumber.toFixed(1)} (Strictly Laminar ≪ 2,100) · Wo = {physicsResult.hfWomersleyNumber.toFixed(2)}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    <strong>1. Why Bioreactor Controls Don&apos;t Change Filter Hydraulics:</strong> RPM, impeller count, and sparger O₂% control the stirred-tank vessel, whereas the cell-retention filter is an external recirculation loop governed by fibre inner diameter (<code>d_f</code>), fibre length (<code>L_f</code>), total fibres (<code>N_fibres × N_cartridges</code>), and recirculation flow (<code>Q_HF</code>).
+                  </p>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    <strong>2. Separate Physical Shear Mechanisms &amp; Limits:</strong> Inside the stirred vessel, cells face continuous 3D isotropic turbulent eddies and blade-tip trailing vortices (<strong>τ_imp ≤ {groundedParams.shearThresholdPa.toFixed(2)} Pa</strong>, Kolmogorov <strong>λ_K ≥ 18 μm</strong>; Nienow 1997; Neunstoecklin et al. 2015). Inside smooth hollow-fibre capillaries, flow is laminar Hagen–Poiseuille flow (<code>Re = {physicsResult.hfLumenReynoldsNumber.toFixed(1)}</code>) with brief 2–5 s single-pass transit and axial cell migration away from walls. Literature for 30-day CHO perfusion (Clincke et al. 2013; Kelly et al. 2014; Karst et al. 2016) establishes a separate <strong>laminar lumen wall-shear ceiling of τ_w,crit = 2.50 Pa cycle-mean</strong> (γ_w ≤ 2,809 s⁻¹; ATF peak half-cycle ≤ 3.93 Pa) to prevent sub-lethal LDH/HCP release, alongside a <strong>minimum anti-fouling crossflow floor of γ_w ≥ {physicsResult.hfMinAntiFoulingShearRatePerS} s⁻¹</strong> and <strong>ΔP_HF ≤ 35.0 kPa</strong>.
+                  </p>
+                </div>
+
+                {/* Interactive Filter Controls Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {/* Control 1: Filtration Mode (ATF vs TFF) & Parallel Cartridges */}
+                  <div className="p-3 bg-slate-50 border border-slate-200 space-y-2.5">
+                    <div>
+                      <label className="block text-[11px] font-mono font-bold text-slate-800 mb-1">
+                        1. Filtration Mode (ATF Oscillating vs. TFF Steady)
+                      </label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(
+                          [
+                            {
+                              id: 'atf_alternating',
+                              label: 'ATF Alternating',
+                              sub: 'Diaphragm (No Pump)',
+                            },
+                            {
+                              id: 'tff_steady',
+                              label: 'TFF Steady Loop',
+                              sub: 'Pump (+0.38 Pa head)',
+                            },
+                          ] as Array<{
+                            id: CellRetentionFiltrationMode;
+                            label: string;
+                            sub: string;
+                          }>
+                        ).map((m) => {
+                          const active =
+                            (hfParams.retentionMode ?? 'atf_alternating') === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() =>
+                                onUpdateHfParams({
+                                  ...hfParams,
+                                  retentionMode: m.id,
+                                })
+                              }
+                              className={`p-1.5 text-left border font-mono cursor-pointer ${
+                                active
+                                  ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                              }`}
+                            >
+                              <div className="text-[11px]">{m.label}</div>
+                              <div
+                                className={`text-[9px] ${
+                                  active ? 'text-indigo-100' : 'text-slate-500'
+                                }`}
+                              >
+                                {m.sub}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-mono font-bold text-slate-800 mb-1">
+                        2. Parallel Filter Cartridges (N_cartridges)
+                      </label>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {[1, 2, 3].map((count) => {
+                          const active =
+                            (hfParams.parallelCartridgesCount ?? 1) === count;
+                          return (
+                            <button
+                              key={count}
+                              type="button"
+                              onClick={() =>
+                                onUpdateHfParams({
+                                  ...hfParams,
+                                  parallelCartridgesCount: count,
+                                })
+                              }
+                              className={`py-1.5 text-xs font-mono border cursor-pointer ${
+                                active
+                                  ? 'bg-slate-900 text-white border-slate-900 font-bold'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                              }`}
+                            >
+                              {count}× ({(( count * hfParams.numberOfFibres) / 1000).toFixed(1)}k)
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Control 2: Fibre Inner Diameter (d_f) & Quick Presets */}
+                  <div className="p-3 bg-slate-50 border border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between text-[11px] font-mono">
+                      <span className="font-bold text-slate-800">
+                        3. Fibre Lumen ID (d_f)
+                      </span>
+                      <span className="font-bold text-indigo-700">
+                        {hfParams.fibreInnerDiameterUm} μm
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      aria-label="Hollow-Fibre Inner Diameter (micrometers)"
+                      min={200}
+                      max={450}
+                      step={10}
+                      value={hfParams.fibreInnerDiameterUm}
+                      onChange={(e) =>
+                        onUpdateHfParams({
+                          ...hfParams,
+                          fibreInnerDiameterUm: Number(e.target.value),
+                        })
+                      }
+                      className="w-full accent-indigo-600 cursor-pointer"
+                    />
+                    <div className="flex items-center justify-between gap-1">
+                      {[250, 280, 320, 340, 380].map((dfPreset) => (
+                        <button
+                          key={dfPreset}
+                          type="button"
+                          onClick={() =>
+                            onUpdateHfParams({
+                              ...hfParams,
+                              fibreInnerDiameterUm: dfPreset,
+                            })
+                          }
+                          className={`px-1.5 py-0.5 text-[10px] font-mono border cursor-pointer ${
+                            hfParams.fibreInnerDiameterUm === dfPreset
+                              ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
+                              : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                          }`}
+                        >
+                          {dfPreset}μm
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-[10px] font-mono text-slate-600">
+                      Cubic/quartic lever: τ_w ∝ d_f⁻³ and ΔP ∝ d_f⁻⁴. Widening 280 → 340 μm cuts τ_w by 44%!
+                    </div>
+                  </div>
+
+                  {/* Control 3: Recirculation Flow Rate (Q_HF), Fibre Length (L_f), and Fibre Count */}
+                  <div className="p-3 bg-slate-50 border border-slate-200 space-y-2">
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] font-mono">
+                        <span className="font-bold text-slate-800">
+                          4. Exchange Flow (Q_HF)
+                        </span>
+                        <span className="font-bold text-indigo-700">
+                          {hfParams.recirculationFlowLMin.toFixed(1)} L/min
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        aria-label="Filter Recirculation Flow Rate (L/min)"
+                        min={1.5}
+                        max={12.0}
+                        step={0.1}
+                        value={hfParams.recirculationFlowLMin}
+                        onChange={(e) =>
+                          onUpdateHfParams({
+                            ...hfParams,
+                            recirculationFlowLMin: Number(e.target.value),
+                          })
+                        }
+                        className="w-full accent-indigo-600 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200">
+                      <div>
+                        <div className="flex justify-between text-[10px] font-mono">
+                          <span className="text-slate-600">Length L_f</span>
+                          <span className="font-bold text-slate-900">
+                            {hfParams.fibreLengthM.toFixed(2)} m
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          aria-label="Fibre Effective Length (m)"
+                          min={0.2}
+                          max={0.55}
+                          step={0.02}
+                          value={hfParams.fibreLengthM}
+                          onChange={(e) =>
+                            onUpdateHfParams({
+                              ...hfParams,
+                              fibreLengthM: Number(e.target.value),
+                            })
+                          }
+                          className="w-full accent-indigo-600 cursor-pointer"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] font-mono">
+                          <span className="text-slate-600">Fibres/Cart</span>
+                          <span className="font-bold text-slate-900">
+                            {hfParams.numberOfFibres.toLocaleString()}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          aria-label="Number of Fibres per Cartridge"
+                          min={8000}
+                          max={22000}
+                          step={500}
+                          value={hfParams.numberOfFibres}
+                          onChange={(e) =>
+                            onUpdateHfParams({
+                              ...hfParams,
+                              numberOfFibres: Number(e.target.value),
+                            })
+                          }
+                          className="w-full accent-indigo-600 cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live 4-Card Filter Hydraulics Diagnostic Readout */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs font-mono">
+                  <div
+                    className={`p-2.5 border ${
+                      physicsResult.isHfWallShearViolated
+                        ? 'bg-rose-50 border-rose-300 text-rose-950'
+                        : 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                    }`}
+                  >
+                    <div className="text-[10px] uppercase font-bold opacity-75">
+                      Lumen Wall Shear (τ_w,HF ≤ 2.50 Pa)
+                    </div>
+                    <div className="text-sm font-bold mt-0.5">
+                      {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} Pa (
+                      {physicsResult.hfWallShearLoadPct.toFixed(0)}% ·{' '}
+                      {physicsResult.isHfWallShearViolated ? 'FAIL' : 'PASS'})
+                    </div>
+                    <div className="text-[10px] mt-0.5 opacity-90">
+                      {(hfParams.retentionMode ?? 'atf_alternating') === 'atf_alternating'
+                        ? `Cycle-mean: ${physicsResult.hfCycleMeanWallShearPa.toFixed(2)} Pa · ATF peak: ${physicsResult.hfPeakOscillatoryWallShearPa.toFixed(2)} Pa`
+                        : `Steady lumen: ${physicsResult.hfCycleMeanWallShearPa.toFixed(2)} Pa + Pump: ${physicsResult.hfPumpHeadShearEquivalentPa.toFixed(2)} Pa`}
+                    </div>
+                  </div>
+
+                  <div
+                    className={`p-2.5 border ${
+                      physicsResult.isHfPressureDropViolated
+                        ? 'bg-rose-50 border-rose-300 text-rose-950'
+                        : 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                    }`}
+                  >
+                    <div className="text-[10px] uppercase font-bold opacity-75">
+                      Axial Pressure Drop (ΔP_HF ≤ 35 kPa)
+                    </div>
+                    <div className="text-sm font-bold mt-0.5">
+                      {physicsResult.hfPressureDropKpa.toFixed(1)} kPa (
+                      {physicsResult.hfPressureDropLoadPct.toFixed(0)}% ·{' '}
+                      {physicsResult.isHfPressureDropViolated ? 'FAIL' : 'PASS'})
+                    </div>
+                    <div className="text-[10px] mt-0.5 opacity-90">
+                      Lumen velocity v = {physicsResult.hfLumenVelocityMPerS.toFixed(3)} m/s
+                    </div>
+                  </div>
+
+                  <div
+                    className={`p-2.5 border ${
+                      physicsResult.isHfFoulingVelocityTooLow
+                        ? 'bg-rose-50 border-rose-300 text-rose-950'
+                        : 'bg-slate-50 border-slate-200 text-slate-900'
+                    }`}
+                  >
+                    <div className="text-[10px] uppercase font-bold opacity-75">
+                      Membrane Area &amp; Anti-Fouling γ_w
+                    </div>
+                    <div className="text-sm font-bold mt-0.5">
+                      A_mem = {physicsResult.hfTotalMembraneAreaM2.toFixed(2)} m² ·{' '}
+                      {physicsResult.hfPermeateFluxLmh.toFixed(1)} LMH
+                    </div>
+                    <div className="text-[10px] mt-0.5">
+                      γ_w = {physicsResult.hfWallShearRatePerS} s⁻¹ (min{' '}
+                      {physicsResult.hfMinAntiFoulingShearRatePerS} s⁻¹:{' '}
+                      {physicsResult.isHfFoulingVelocityTooLow ? 'FOULING FAIL' : 'PASS'})
+                    </div>
+                  </div>
+
+                  <div
+                    className={`p-2.5 border ${
+                      physicsResult.hfAxialOxygenDepleted
+                        ? 'bg-rose-50 border-rose-300 text-rose-950'
+                        : 'bg-slate-50 border-slate-200 text-slate-900'
+                    }`}
+                  >
+                    <div className="text-[10px] uppercase font-bold opacity-75">
+                      Single-Pass Filter Outlet DO
+                    </div>
+                    <div className="text-sm font-bold mt-0.5">
+                      DO_out = {physicsResult.hfOutletDoPercent.toFixed(1)}% (
+                      {physicsResult.hfAxialOxygenDepleted ? 'FAIL < 20%' : 'PASS ≥ 20%'})
+                    </div>
+                    <div className="text-[10px] mt-0.5">
+                      {physicsResult.hfEffectiveTotalFibres.toLocaleString()} total fibres ({hfParams.parallelCartridgesCount ?? 1}× cart)
+                    </div>
+                  </div>
+                </div>
+
+                {/* Explicit ATF vs TFF Womersley Physical Approximation Notice */}
+                <div className="p-2.5 bg-indigo-50/70 border border-indigo-200 text-[11px] text-indigo-950 font-mono">
+                  <strong>Physical Formulation &amp; Approximation Disclosure:</strong>{' '}
+                  {physicsResult.hfApproximationDisclosure}
+                </div>
+
+                {/* Expandable 3 Ranked Filter Intervention Cards ("Suggest Filter Improvements") */}
+                {showFilterSuggestionsPanel && (
+                  <div className="border-t border-slate-200 pt-3 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs font-mono font-bold uppercase text-indigo-950">
+                        AI-Calculated Cell-Retention Filter Interventions (Live Hagen–Poiseuille Model)
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateHfParams(DEFAULT_HF_PHYSICS)}
+                        className="px-2.5 py-1 text-[11px] font-mono border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 cursor-pointer"
+                      >
+                        Reset Filter to Baseline (280 μm · 6.5 L/min)
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                      {filterSuggestions.map((opt) => {
+                        const isApplied = lastAppliedFilterOptId === opt.id;
+                        return (
+                          <div
+                            key={opt.id}
+                            className={`border p-3 flex flex-col justify-between space-y-2.5 ${
+                              isApplied
+                                ? 'border-emerald-600 bg-emerald-50/40 ring-1 ring-emerald-600'
+                                : 'border-slate-300 bg-slate-50/60'
+                            }`}
+                          >
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between gap-1 text-[10px] font-mono">
+                                <span className="px-1.5 py-0.5 bg-indigo-600 text-white font-bold">
+                                  OPTION #{opt.rank}
+                                </span>
+                                <span className="px-1.5 py-0.5 bg-slate-200 text-slate-800 font-semibold">
+                                  {opt.strategyBadge}
+                                </span>
+                              </div>
+                              <h3 className="text-xs font-bold text-slate-900">
+                                {opt.title}
+                              </h3>
+                              <p className="text-[11px] text-slate-600 leading-relaxed">
+                                {opt.summaryRationale}
+                              </p>
+
+                              <div className="p-2 bg-white border border-slate-200 text-[10px] font-mono space-y-0.5">
+                                <div className="font-bold text-slate-800">
+                                  Recalculated Filter Metrics:
+                                </div>
+                                <div className="text-emerald-800 font-bold">
+                                  • τ_w,eff: {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} →{' '}
+                                  {opt.evalPhysics.hfEffectiveWallShearStressPa.toFixed(2)} Pa (
+                                  {opt.evalPhysics.hfWallShearLoadPct.toFixed(0)}% of 2.50 Pa)
+                                </div>
+                                <div className="text-emerald-800 font-bold">
+                                  • ΔP_HF: {physicsResult.hfPressureDropKpa.toFixed(1)} →{' '}
+                                  {opt.evalPhysics.hfPressureDropKpa.toFixed(1)} kPa (
+                                  {opt.evalPhysics.hfPressureDropLoadPct.toFixed(0)}% of 35 kPa)
+                                </div>
+                                <div className="text-slate-700">
+                                  • Crossflow γ_w: {opt.evalPhysics.hfWallShearRatePerS} s⁻¹ · DO_out:{' '}
+                                  {opt.evalPhysics.hfOutletDoPercent.toFixed(1)}% · A_mem:{' '}
+                                  {opt.evalPhysics.hfTotalMembraneAreaM2.toFixed(2)} m²
+                                </div>
+                              </div>
+
+                              <div className="text-[10px] text-slate-700 space-y-0.5">
+                                <div className="font-mono font-bold text-slate-800">
+                                  Settings Changed:
+                                </div>
+                                {opt.parameterChangesFromCurrent.map((chg, i) => (
+                                  <div key={i} className="font-mono">
+                                    • {chg}
+                                  </div>
+                                ))}
+                              </div>
+
+                              <div className="text-[10px] text-amber-900 bg-amber-50/80 border border-amber-200 p-1.5 space-y-0.5">
+                                <div className="font-mono font-bold">
+                                  Engineering Trade-Offs &amp; Limits:
+                                </div>
+                                {opt.tradeOffsAndLimitations.map((tr, i) => (
+                                  <div key={i}>• {tr}</div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onUpdateHfParams(opt.proposedHfParams);
+                                setLastAppliedFilterOptId(opt.id);
+                              }}
+                              className={`w-full py-1.5 px-2.5 text-xs font-mono font-bold cursor-pointer ${
+                                isApplied
+                                  ? 'bg-emerald-700 text-white'
+                                  : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                              }`}
+                            >
+                              {isApplied
+                                ? '✓ Applied Filter Settings to Simulation'
+                                : 'Apply Filter Settings to Simulation'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Expandable "Show Scientific Reasoning" Drawer */}
@@ -2365,11 +3072,12 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                     </tr>
                     <tr>
                       <td className="py-2 px-3 font-sans font-semibold text-slate-900">
-                        Hollow-Fibre Filter ΔP &amp; Wall Shear
+                        Hollow-Fibre Filter ΔP &amp; Laminar Wall Shear
                       </td>
-                      <td className="py-2 px-3 text-amber-800">
+                      <td className="py-2 px-3 text-rose-700 font-semibold">
                         {baselinePhysics.hfPressureDropKpa.toFixed(1)} kPa ·{' '}
-                        {baselinePhysics.hfWallShearStressPa.toFixed(2)} Pa (81% load)
+                        {baselinePhysics.hfEffectiveWallShearStressPa.toFixed(2)} Pa (
+                        {baselinePhysics.hfWallShearLoadPct.toFixed(0)}% load — FAIL)
                       </td>
                       <td
                         className={`py-2 px-3 font-bold ${
@@ -2377,11 +3085,12 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                         }`}
                       >
                         {physicsResult.hfPressureDropKpa.toFixed(1)} kPa ·{' '}
-                        {physicsResult.hfWallShearStressPa.toFixed(2)} Pa (
+                        {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} Pa (
                         {currentRadarLoads.filterHydraulicsLoadPct.toFixed(0)}% load)
                       </td>
                       <td className="py-2 px-3">
-                        ≤ 25 kPa &amp; ≤ {groundedParams.shearThresholdPa} Pa (
+                        ΔP ≤ {physicsResult.hfPressureDropLimitKpa.toFixed(0)} kPa &amp; τ_w,lumen ≤{' '}
+                        {physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa (
                         {isFilterViolated ? 'FAIL' : 'PASS'})
                       </td>
                     </tr>

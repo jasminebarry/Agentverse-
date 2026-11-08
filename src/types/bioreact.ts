@@ -332,6 +332,8 @@ export interface StirredTankPhysicsParams {
   multiImpellerPowerModel?: 'independent_additive' | 'spacing_interaction_corrected';
 }
 
+export type CellRetentionFiltrationMode = 'atf_alternating' | 'tff_steady';
+
 export interface HollowFibrePhysicsParams {
   cartridgeVolumeL: number;
   fibreInnerDiameterUm: number;
@@ -341,6 +343,8 @@ export interface HollowFibrePhysicsParams {
   inletDoPercent: number;
   oxygenEnrichmentFraction: number;
   ecsCellDensityE6PerMl: number;
+  retentionMode?: CellRetentionFiltrationMode;
+  parallelCartridgesCount?: number;
 }
 
 export interface DownstreamEconomicParams {
@@ -434,6 +438,29 @@ export interface MassBalanceAndPhysicsResult {
   hfWallShearStressPa: number;
   hfOutletDoPercent: number;
   hfAxialOxygenDepleted: boolean;
+  hfRetentionMode: CellRetentionFiltrationMode;
+  hfParallelCartridgesCount: number;
+  hfEffectiveTotalFibres: number;
+  hfTotalMembraneAreaM2: number;
+  hfPermeateFluxLmh: number;
+  hfLumenReynoldsNumber: number;
+  hfWomersleyNumber: number;
+  hfCycleMeanWallShearPa: number;
+  hfPeakOscillatoryWallShearPa: number;
+  hfPumpHeadShearEquivalentPa: number;
+  hfEffectiveWallShearStressPa: number;
+  hfLumenWallShearLimitPa: number;
+  hfPressureDropLimitKpa: number;
+  hfMinAntiFoulingShearRatePerS: number;
+  hfPressureDropLoadPct: number;
+  hfWallShearLoadPct: number;
+  hfFoulingRiskLoadPct: number;
+  isHfPressureDropViolated: boolean;
+  isHfWallShearViolated: boolean;
+  isHfFoulingVelocityTooLow: boolean;
+  isHfHydraulicsViolated: boolean;
+  hfFailingSubConstraints: string[];
+  hfApproximationDisclosure: string;
   isScaleUpFeasible: boolean;
   limitingFactors: string[];
   automatedPipelineNextSteps: string[];
@@ -1162,5 +1189,19 @@ export interface UnifiedReactorOptimisationSuite {
   paretoConflictSummary: string[];
   unsupportedModelNotices: UnsupportedModelAspectNotice[];
 }
+
+export interface FilterHydraulicInterventionOption {
+  id: string;
+  rank: 1 | 2 | 3;
+  title: string;
+  strategyBadge: string;
+  summaryRationale: string;
+  proposedHfParams: HollowFibrePhysicsParams;
+  evalPhysics: MassBalanceAndPhysicsResult;
+  parameterChangesFromCurrent: string[];
+  tradeOffsAndLimitations: string[];
+  evidenceAndApproximationNotes: string[];
+}
+
 
 
