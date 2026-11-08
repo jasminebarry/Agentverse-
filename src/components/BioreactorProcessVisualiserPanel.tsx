@@ -245,13 +245,52 @@ export const BioreactorProcessVisualiserPanel: React.FC<
   const isCo2StrippingLow = strParams.spargeRateVvm < 0.018;
   const isGasFlowViolation = isFoamingHigh || isCo2StrippingLow;
 
+  const failedConstraintShortLabels: string[] = [];
+  if (isOxygenDeficit) {
+    failedConstraintShortLabels.push(
+      `O₂ Transfer (OTR ${physics.otrMmolPerLHour.toFixed(1)} < OUR ${physics.ourMmolPerLHour.toFixed(1)})`
+    );
+  }
+  if (isShearExceeded) {
+    failedConstraintShortLabels.push(
+      `Impeller Shear (${physics.estimatedShearStressPa.toFixed(2)} > ${groundedParams.shearThresholdPa} Pa)`
+    );
+  }
+  if (isEddyTooSmall) {
+    failedConstraintShortLabels.push(
+      `Eddy Scale (${physics.kolmogorovScaleUm.toFixed(1)} < 18.0 μm)`
+    );
+  }
+  if (isMixingSlow) {
+    failedConstraintShortLabels.push(
+      `Bulk Mixing (${physics.mixingTimeGassedS.toFixed(1)} > 60.0 s)`
+    );
+  }
+  if (isHfViolated) {
+    failedConstraintShortLabels.push(
+      physics.isHfWallShearViolated
+        ? `Filter Wall Shear (τ_w ${physics.hfEffectiveWallShearStressPa.toFixed(2)} > ${physics.hfLumenWallShearLimitPa.toFixed(2)} Pa)`
+        : `Filter Hydraulics (ΔP ${physics.hfPressureDropKpa.toFixed(1)} kPa)`
+    );
+  }
+  if (isGasFlowViolation) {
+    failedConstraintShortLabels.push(
+      `Aeration (${strParams.spargeRateVvm.toFixed(3)} vvm)`
+    );
+  }
+  if (physics.isTopSubmergenceInsufficient && strParams.impellerCount >= 2) {
+    failedConstraintShortLabels.push(
+      `Top Submergence (S_top/D_i ${physics.topImpellerSubmergenceRatioStopDi.toFixed(2)} < 0.50)`
+    );
+  }
+  if (physics.isCloselySpacedInteractionFlagged && strParams.impellerCount >= 2) {
+    failedConstraintShortLabels.push(
+      `Impeller Spacing (ΔC/D_i ${physics.impellerSpacingRatioDeltaCDi.toFixed(2)} < 1.50)`
+    );
+  }
+
   const isAllFeasible =
-    !isOxygenDeficit &&
-    !isShearOrEddyViolation &&
-    !isMixingSlow &&
-    !isHfViolated &&
-    !isGasFlowViolation &&
-    physics.isScaleUpFeasible;
+    failedConstraintShortLabels.length === 0 && physics.isScaleUpFeasible;
 
   const spargerType = strParams.spargerType ?? 'open_pipe';
   const isMicrosparger = spargerType === 'sintered_microsparger';
@@ -596,8 +635,8 @@ export const BioreactorProcessVisualiserPanel: React.FC<
               }`}
             >
               {isAllFeasible
-                ? `✓ ALL 6 AXES FEASIBLE (MAX LOAD ${currentRadar.maxAxisLoadPct.toFixed(0)}%)`
-                : `✕ CONSTRAINT VIOLATION (${physics.limitingFactors.length} ACTIVE)`}
+                ? `✓ ALL CONSTRAINTS PASSING (MAX LOAD ${currentRadar.maxAxisLoadPct.toFixed(0)}%)`
+                : `✕ BOTTLENECK DETECTED: ${failedConstraintShortLabels.join(' · ') || 'Constraint Violated'}`}
             </div>
           </div>
 
@@ -1417,7 +1456,7 @@ export const BioreactorProcessVisualiserPanel: React.FC<
                   3. Impeller Count (Discrete 1–3)
                 </label>
                 <div className="grid grid-cols-3 gap-1">
-                  {[1, 2, 3].map((nCount) => (
+                  {([1, 2, 3] as const).map((nCount) => (
                     <button
                       key={nCount}
                       type="button"
@@ -1426,8 +1465,8 @@ export const BioreactorProcessVisualiserPanel: React.FC<
                           ...strParams,
                           impellerCount: nCount,
                           aspectRatioZDt:
-                            nCount === 3 && strParams.aspectRatioZDt < 1.8
-                              ? 1.9
+                            nCount === 3 && strParams.aspectRatioZDt < 1.98
+                              ? 2.0
                               : strParams.aspectRatioZDt,
                         })
                       }

@@ -78,17 +78,14 @@ function buildConstraintAxes(
   const shearLoadPct = (tau / tauCrit) * 100;
   const shearViolated = tau > tauCrit;
 
-  // 3. Gassed Bulk Mixing Time (Upper Bound: t_m <= effective limit)
-  // Governing limit is min(60 s, 2 / kLa) when oxygen-transfer time constant governs macromixing.
+  // 3. Gassed Bulk Mixing Time (Upper Bound: t_m <= 60.0 s)
   const twoOverKlaS = Math.max(12.0, 2.0 * physics.oxygenTransferTimeConstantS);
-  const tmEffectiveLimit = physics.isMixingRateLimiting
-    ? Math.min(60.0, twoOverKlaS)
-    : 60.0;
+  const tmEffectiveLimit = 60.0;
   const tm = physics.mixingTimeGassedS;
   const tmMargin = tmEffectiveLimit - tm;
   const tmMarginPct = (tmMargin / tmEffectiveLimit) * 100;
   const tmLoadPct = (tm / tmEffectiveLimit) * 100;
-  const tmViolated = tm > tmEffectiveLimit || physics.isMixingRateLimiting;
+  const tmViolated = tm > tmEffectiveLimit;
 
   // 4. Kolmogorov Micro-Eddy Length Scale (Lower Bound: lambda_K >= 18.0 um)
   // Larger eddies are safer; eddies smaller than 18 um damage cells.

@@ -15,6 +15,7 @@ import {
 } from '../services/bioprocessEngine';
 import {
   DEFAULT_STR_PHYSICS,
+  FEASIBLE_500L_HF_PHYSICS,
   IMPELLER_GEOMETRY_SPECS,
 } from '../data/bioprocessData';
 import {
@@ -35,6 +36,7 @@ interface ResolveOxygenLimitationPanelProps {
   groundedParams: GroundedSimulatorParams;
   physics: MassBalanceAndPhysicsResult;
   onUpdateStrParams: (next: StirredTankPhysicsParams) => void;
+  onUpdateHfParams?: (next: HollowFibrePhysicsParams) => void;
   safetyGates?: HumanSafetyGate[];
   onUpdateSafetyGate?: (
     gateId: SafetyGateId,
@@ -62,6 +64,7 @@ export const ResolveOxygenLimitationPanel: React.FC<
   groundedParams,
   physics,
   onUpdateStrParams,
+  onUpdateHfParams,
   safetyGates = [],
   onUpdateSafetyGate,
 }) => {
@@ -188,17 +191,24 @@ export const ResolveOxygenLimitationPanel: React.FC<
       },
     ];
 
+    const targetHfForProposals: HollowFibrePhysicsParams = physics.isHfHydraulicsViolated
+      ? FEASIBLE_500L_HF_PHYSICS
+      : hfParams;
+
     return rawProposals.map((proposal) => ({
       proposal,
       evaluatedPhysics: solveMassBalanceAndReactorPhysics(
         proposal.proposedParams,
-        hfParams,
+         {
+          ...targetHfForProposals,
+          oxygenEnrichmentFraction: proposal.proposedParams.oxygenEnrichmentFraction,
+        },
         groundedParams,
         groundedParams.optimalVvd,
         groundedParams.optimalDoPercent
       ),
     }));
-  }, [strParams, hfParams, groundedParams]);
+  }, [strParams, hfParams, groundedParams, physics.isHfHydraulicsViolated]);
 
   const selectedStagedEntry =
     agentProposals.find((p) => p.proposal.id === stagedProposalId) ??
@@ -207,6 +217,13 @@ export const ResolveOxygenLimitationPanel: React.FC<
   const handleApplyStagedProposalAfterHumanReview = () => {
     if (!selectedStagedEntry) return;
     onUpdateStrParams(selectedStagedEntry.proposal.proposedParams);
+    if (onUpdateHfParams && physics.isHfHydraulicsViolated) {
+      onUpdateHfParams({
+        ...FEASIBLE_500L_HF_PHYSICS,
+        oxygenEnrichmentFraction:
+          selectedStagedEntry.proposal.proposedParams.oxygenEnrichmentFraction,
+      });
+    }
     setHumanReviewedProposalId(selectedStagedEntry.proposal.id);
   };
 

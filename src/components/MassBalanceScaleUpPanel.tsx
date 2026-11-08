@@ -22,6 +22,7 @@ import {
 import {
   DEFAULT_HF_PHYSICS,
   DEFAULT_STR_PHYSICS,
+  FEASIBLE_500L_HF_PHYSICS,
   FEASIBLE_500L_STR_PHYSICS,
   IMPELLER_GEOMETRY_SPECS,
 } from '../data/bioprocessData';
@@ -199,6 +200,7 @@ export const MassBalanceScaleUpPanel: React.FC<MassBalanceScaleUpPanelProps> = (
               type="button"
               onClick={() => {
                 onUpdateStrParams(DEFAULT_STR_PHYSICS);
+                onUpdateHfParams(DEFAULT_HF_PHYSICS);
               }}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-semibold text-white bg-rose-700 hover:bg-rose-800 transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
@@ -208,12 +210,12 @@ export const MassBalanceScaleUpPanel: React.FC<MassBalanceScaleUpPanelProps> = (
               type="button"
               onClick={() => {
                 onUpdateStrParams(FEASIBLE_500L_STR_PHYSICS);
-                onUpdateHfParams(DEFAULT_HF_PHYSICS);
+                onUpdateHfParams(FEASIBLE_500L_HF_PHYSICS);
               }}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-semibold text-white bg-emerald-700 hover:bg-emerald-800 transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Apply Microsparger + 60% O₂ Fix (OTR 18.6 ≥ OUR 13.9)</span>
+              <span>Apply Microsparger + 60% O₂ &amp; Filter Fix (OTR 18.6 ≥ OUR 13.9)</span>
             </button>
             <a
               href="/assets/aistudio/mixing_2022_b720717f.pdf"
@@ -262,7 +264,10 @@ export const MassBalanceScaleUpPanel: React.FC<MassBalanceScaleUpPanelProps> = (
             </div>
             <button
               type="button"
-              onClick={() => onUpdateStrParams(FEASIBLE_500L_STR_PHYSICS)}
+              onClick={() => {
+                onUpdateStrParams(FEASIBLE_500L_STR_PHYSICS);
+                onUpdateHfParams(FEASIBLE_500L_HF_PHYSICS);
+              }}
               className="px-3.5 py-2 text-xs font-mono font-semibold bg-emerald-700 text-white hover:bg-emerald-800 shrink-0 cursor-pointer"
             >
               Investigate Microsparger + 60% O₂ Redesign →
@@ -314,6 +319,7 @@ export const MassBalanceScaleUpPanel: React.FC<MassBalanceScaleUpPanelProps> = (
         groundedParams={groundedParams}
         physics={physics}
         onUpdateStrParams={onUpdateStrParams}
+        onUpdateHfParams={onUpdateHfParams}
         safetyGates={safetyGates}
         onUpdateSafetyGate={onUpdateSafetyGate}
       />

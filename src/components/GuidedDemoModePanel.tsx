@@ -25,7 +25,6 @@ import {
   GroundedSimulatorParams,
   HollowFibrePhysicsParams,
   HumanSafetyGate,
-  ImpellerType,
   LiveEightSeedBenchmarkSummary,
   MassBalanceAndPhysicsResult,
   ProposedReactorConfiguration,
@@ -50,9 +49,9 @@ import {
   formatCogsHeadline,
   optimiseUnifiedReactorConfiguration,
   solveMassBalanceAndReactorPhysics,
-  suggestFilterHydraulicImprovements,
 } from '../services/bioprocessEngine';
 import { WorkbenchSectionId } from './UnifiedWorkbenchHomePanel';
+import { BioreactorProcessVisualiserPanel } from './BioreactorProcessVisualiserPanel';
 import {
   DrugTargetKnownBinderIntakeState,
   INITIAL_DRUG_TARGET_PRESETS,
@@ -375,6 +374,7 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
   downstreamEcon,
   downstreamCogs,
   safetyGates,
+  onUpdateSafetyGate,
   onApproveAllDemoGates,
   prismaIncludedCount,
   liveEightSeedSummary,
@@ -397,8 +397,6 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
   // Progressive Disclosure Dropdowns (Keep default UI super clean and uncluttered!)
   const [showCustomInputForm, setShowCustomInputForm] = useState<boolean>(false);
   const [showScientificDetailsDropdown, setShowScientificDetailsDropdown] =
-    useState<boolean>(false);
-  const [showFilterControlsDropdown, setShowFilterControlsDropdown] =
     useState<boolean>(false);
 
   // 3D Viewer Controls
@@ -658,27 +656,53 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
   const isO2Starved = physicsResult.otrMmolPerLHour < physicsResult.ourMmolPerLHour;
   const isShearViolated =
     physicsResult.estimatedShearStressPa > groundedParams.shearThresholdPa ||
-    physicsResult.kolmogorovScaleUm <= 18;
-  const isMixingSlow = physicsResult.mixingTimeGassedS > 60;
+    physicsResult.kolmogorovScaleUm < 18.0;
+  const isMixingSlow = physicsResult.mixingTimeGassedS > 60.0;
   const isFilterViolated = physicsResult.isHfHydraulicsViolated;
-  const isAllPhysicsFeasible =
-    physicsResult.isScaleUpFeasible &&
-    !isO2Starved &&
-    !isShearViolated &&
-    !isMixingSlow &&
-    !isFilterViolated;
+  const isGasFlowViolated =
+    strParams.spargeRateVvm < 0.018 || strParams.spargeRateVvm > 0.095;
 
-  const filterSuggestions = useMemo(
-    () =>
-      suggestFilterHydraulicImprovements(
-        strParams,
-        hfParams,
-        groundedParams,
-        groundedParams.optimalVvd,
-        groundedParams.optimalDoPercent
-      ),
-    [strParams, hfParams, groundedParams]
-  );
+  const failedConstraintDetails: string[] = [];
+  if (isO2Starved) {
+    failedConstraintDetails.push(
+      `Oxygen Transfer (OTR ${physicsResult.otrMmolPerLHour.toFixed(1)} < OUR ${physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h)`
+    );
+  }
+  if (isShearViolated) {
+    failedConstraintDetails.push(
+      `Impeller Shear / Eddy (τ ${physicsResult.estimatedShearStressPa.toFixed(2)} Pa vs ${groundedParams.shearThresholdPa} Pa limit, λ_K ${physicsResult.kolmogorovScaleUm.toFixed(1)} μm)`
+    );
+  }
+  if (isMixingSlow) {
+    failedConstraintDetails.push(
+      `Bulk Mixing Time (t_m ${physicsResult.mixingTimeGassedS.toFixed(1)} s > 60.0 s limit)`
+    );
+  }
+  if (isFilterViolated) {
+    failedConstraintDetails.push(
+      physicsResult.isHfWallShearViolated
+        ? `Filter Wall Shear (τ_w ${physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} Pa > ${physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa laminar lumen limit)`
+        : `Filter Hydraulics (ΔP ${physicsResult.hfPressureDropKpa.toFixed(1)} kPa vs ${physicsResult.hfPressureDropLimitKpa.toFixed(1)} kPa limit)`
+    );
+  }
+  if (isGasFlowViolated) {
+    failedConstraintDetails.push(
+      `Aeration Window (${strParams.spargeRateVvm.toFixed(3)} vvm outside 0.018–0.095 vvm)`
+    );
+  }
+  if (physicsResult.isTopSubmergenceInsufficient && strParams.impellerCount >= 2) {
+    failedConstraintDetails.push(
+      `Impeller Submergence (S_top/D_i ${physicsResult.topImpellerSubmergenceRatioStopDi.toFixed(2)} < 0.50)`
+    );
+  }
+  if (physicsResult.isCloselySpacedInteractionFlagged && strParams.impellerCount >= 2) {
+    failedConstraintDetails.push(
+      `Impeller Spacing (ΔC/D_i ${physicsResult.impellerSpacingRatioDeltaCDi.toFixed(2)} < 1.50)`
+    );
+  }
+
+  const isAllPhysicsFeasible =
+    failedConstraintDetails.length === 0 && physicsResult.isScaleUpFeasible;
 
   const baseline500LStrParams: StirredTankPhysicsParams = useMemo(
     () => ({
@@ -730,21 +754,6 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
     onUpdateHfParams(cfg.hfParams);
     setLastAppliedConfigId(cfg.id);
   };
-
-  // Animated Bioreactor SVG visual helpers
-  const rotationDurationSec = Math.max(
-    0.35,
-    Math.min(3.0, 60 / Math.max(20, strParams.stirrerSpeedRpm))
-  );
-  const impellerStageYs =
-    strParams.impellerCount === 1
-      ? [235]
-      : strParams.impellerCount === 2
-      ? [180, 240]
-      : [130, 185, 240];
-  const bladeHalfSpanPx = Math.round(
-    28 + (strParams.diameterRatioDiDt - 0.3) * 110
-  );
 
   const STAGES: { id: UnifiedFlowStage; num: string; label: string; sub: string }[] = [
     {
@@ -1459,7 +1468,7 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
             </div>
           )}
 
-          {/* CASE B: MAMMALIAN CHO BIOMANUFACTURING (INTERACTIVE ANIMATED 500 L BIOREACTOR) */}
+          {/* CASE B: MAMMALIAN CHO BIOMANUFACTURING (AUTHORITATIVE INTERACTIVE ANIMATED 500 L BIOREACTOR) */}
           {effectiveModality === 'mammalian_cho_bioreactor' && (
             <div className="space-y-5">
               {/* Plain-English Bottleneck Status Strip */}
@@ -1473,12 +1482,10 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                 <div className="space-y-1 text-xs">
                   <div className="font-bold text-sm">
                     {isAllPhysicsFeasible
-                      ? '✓ All 500 L Bioreactor & Filter Constraints Satisfied'
-                      : isO2Starved
-                      ? '⚠ Bottleneck Detected: The cells need more oxygen than the reactor can currently deliver (OTR < OUR).'
-                      : isFilterViolated
-                      ? '⚠ Bottleneck Detected: Cell-retention hollow-fibre filter lumen shear exceeds the 1.65 Pa safe limit.'
-                      : '⚠ Bottleneck Detected: Mixing time or impeller shear violates safe CHO operating limits.'}
+                      ? '✓ All 500 L Bioreactor & Filter Constraints Satisfied — No Bottleneck Detected'
+                      : `⚠ Bottleneck Detected (${failedConstraintDetails.length} Failing Constraint${
+                          failedConstraintDetails.length > 1 ? 's' : ''
+                        }): ${failedConstraintDetails.join(' · ')}`}
                   </div>
                   <p>
                     Oxygen Supply (OTR):{' '}
@@ -1489,18 +1496,19 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                     <strong className="font-mono">
                       {physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h
                     </strong>{' '}
-                    · Impeller Shear:{' '}
+                    (kLa = <strong className="font-mono">{physicsResult.klaPerHour.toFixed(1)} h⁻¹</strong>) · Impeller Shear:{' '}
                     <strong className="font-mono">
                       {physicsResult.estimatedShearStressPa.toFixed(2)} Pa
                     </strong>{' '}
-                    · Mixing Time:{' '}
+                    (≤ {groundedParams.shearThresholdPa} Pa) · Mixing Time:{' '}
                     <strong className="font-mono">
                       {physicsResult.mixingTimeGassedS.toFixed(1)} s
                     </strong>{' '}
-                    · Filter Wall Shear:{' '}
+                    (≤ 60.0 s) · Filter Wall Shear:{' '}
                     <strong className="font-mono">
                       {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} Pa
-                    </strong>
+                    </strong>{' '}
+                    (≤ {physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa)
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -1511,347 +1519,38 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
                   >
                     Reset to Failing 500 L Baseline
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveStage('optimise')}
-                    className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-800 cursor-pointer"
-                  >
-                    Ask bioREACT to Fix All Bottlenecks →
-                  </button>
-                </div>
-              </div>
-
-              {/* Interactive Animated Bioreactor Cutaway + Essential Controls */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-                {/* Left 7 Cols: Animated 500 L Bioreactor SVG */}
-                <div className="lg:col-span-7 bg-slate-950 border border-slate-800 p-4 flex flex-col justify-between text-slate-100">
-                  <div className="flex items-center justify-between text-xs font-mono pb-2 border-b border-slate-800">
-                    <span className="text-cyan-400 font-bold">
-                      LIVE 500 L STIRRED-TANK BIOREACTOR CUTAWAY
-                    </span>
-                    <span className="text-slate-400">
-                      {strParams.stirrerSpeedRpm} RPM · {strParams.impellerCount}×{' '}
-                      {strParams.impellerType} ·{' '}
-                      {(strParams.oxygenEnrichmentFraction * 100).toFixed(0)}% O₂
-                    </span>
-                  </div>
-
-                  <div className="my-2 flex items-center justify-center">
-                    <svg
-                      viewBox="0 0 500 320"
-                      className="w-full max-h-[300px]"
-                      role="img"
-                      aria-label="Interactive 500 L Stirred-Tank Bioreactor Cutaway"
+                  {unifiedSuite.rankedConfigurations[0] && !isAllPhysicsFeasible && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleApplyProposedConfig(unifiedSuite.rankedConfigurations[0])
+                      }
+                      className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-800 cursor-pointer"
                     >
-                      {/* Vessel Body */}
-                      <rect
-                        x="130"
-                        y="35"
-                        width="220"
-                        height="245"
-                        rx="24"
-                        fill="#0f172a"
-                        stroke={isAllPhysicsFeasible ? '#10b981' : '#f43f5e'}
-                        strokeWidth="3"
-                      />
-                      {/* Culture Liquid */}
-                      <rect
-                        x="134"
-                        y="75"
-                        width="212"
-                        height="201"
-                        rx="18"
-                        fill={isO2Starved ? 'rgba(244,63,94,0.18)' : 'rgba(16,185,129,0.16)'}
-                      />
-                      {/* Central Shaft */}
-                      <line
-                        x1="240"
-                        y1="20"
-                        x2="240"
-                        y2="255"
-                        stroke="#94a3b8"
-                        strokeWidth="5"
-                      />
-                      {/* Impeller Stages */}
-                      {impellerStageYs.map((yPos, idx) => (
-                        <g key={idx}>
-                          <line
-                            x1={240 - bladeHalfSpanPx}
-                            y1={yPos}
-                            x2={240 + bladeHalfSpanPx}
-                            y2={yPos}
-                            stroke={isShearViolated ? '#f43f5e' : '#38bdf8'}
-                            strokeWidth="6"
-                          >
-                            <animateTransform
-                              attributeName="transform"
-                              type="scale"
-                              values="1 1; -1 1; 1 1"
-                              dur={`${rotationDurationSec}s`}
-                              repeatCount="indefinite"
-                              additive="sum"
-                            />
-                          </line>
-                          <circle cx="240" cy={yPos} r="6" fill="#e2e8f0" />
-                        </g>
-                      ))}
-                      {/* Bottom Sparger */}
-                      <rect
-                        x="185"
-                        y="260"
-                        width="110"
-                        height="8"
-                        rx="4"
-                        fill={
-                          strParams.spargerType === 'sintered_microsparger'
-                            ? '#22d3ee'
-                            : '#f59e0b'
-                        }
-                      />
-                      {/* Rising O2 Bubbles */}
-                      {[195, 215, 235, 255, 275, 290].map((bx, i) => (
-                        <circle
-                          key={i}
-                          cx={bx}
-                          cy={250 - (i % 3) * 45}
-                          r={strParams.spargerType === 'sintered_microsparger' ? 3 : 6}
-                          fill={isO2Starved ? '#fda4af' : '#67e8f9'}
-                          opacity="0.8"
-                        >
-                          <animate
-                            attributeName="cy"
-                            from="258"
-                            to="85"
-                            dur={`${1.8 + (i % 3) * 0.5}s`}
-                            repeatCount="indefinite"
-                          />
-                        </circle>
-                      ))}
-                      {/* External Hollow-Fibre Filter Module */}
-                      <rect
-                        x="385"
-                        y="110"
-                        width="48"
-                        height="125"
-                        rx="8"
-                        fill="#1e293b"
-                        stroke={isFilterViolated ? '#f43f5e' : '#10b981'}
-                        strokeWidth="2.5"
-                      />
-                      <text
-                        x="409"
-                        y="102"
-                        textAnchor="middle"
-                        fill={isFilterViolated ? '#fda4af' : '#6ee7b7'}
-                        fontSize="9"
-                        fontFamily="monospace"
-                      >
-                        {hfParams.retentionMode === 'atf_alternating' ? 'ATF' : 'TFF'} ×
-                        {hfParams.parallelCartridgesCount ?? 1}
-                      </text>
-                      <text
-                        x="409"
-                        y="250"
-                        textAnchor="middle"
-                        fill={isFilterViolated ? '#fda4af' : '#94a3b8'}
-                        fontSize="9"
-                        fontFamily="monospace"
-                      >
-                        τ_w {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} Pa
-                      </text>
-                    </svg>
-                  </div>
-
-                  <div className="text-[11px] font-mono text-slate-300 flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
-                    <span>
-                      Sparger:{' '}
-                      {strParams.spargerType === 'sintered_microsparger'
-                        ? '15 μm Sintered Microsparger'
-                        : 'Open-Pipe Sparger'}
-                    </span>
-                    <span>kLa = {physicsResult.klaPerHour.toFixed(1)} h⁻¹</span>
-                  </div>
-                </div>
-
-                {/* Right 5 Cols: Clean Reactor Controls + Expandable Filter Hydraulics Dropdown */}
-                <div className="lg:col-span-5 bg-slate-50 border border-slate-200 p-5 flex flex-col justify-between space-y-4 text-xs">
-                  <div className="space-y-3">
-                    <div className="font-bold text-slate-900">
-                      Adjust 500 L Bioreactor Operating Controls
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between font-medium text-slate-700 mb-1">
-                        <span>Impeller Speed (RPM)</span>
-                        <span className="font-mono font-bold">{strParams.stirrerSpeedRpm} RPM</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={50}
-                        max={160}
-                        value={strParams.stirrerSpeedRpm}
-                        onChange={(e) =>
-                          onUpdateStrParams({
-                            ...strParams,
-                            stirrerSpeedRpm: Number(e.target.value),
-                          })
-                        }
-                        className="w-full"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block font-medium text-slate-700 mb-1">
-                          Impeller Type
-                        </label>
-                        <select
-                          value={strParams.impellerType}
-                          onChange={(e) =>
-                            onUpdateStrParams({
-                              ...strParams,
-                              impellerType: e.target.value as ImpellerType,
-                            })
-                          }
-                          className="w-full px-2 py-1.5 bg-white border border-slate-300"
-                        >
-                          <option value="pitched_blade">Pitched-Blade (Low Shear)</option>
-                          <option value="marine_axial">Marine Hydrofoil</option>
-                          <option value="rushton_radial">Rushton Turbine (High Shear)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block font-medium text-slate-700 mb-1">
-                          Sparger Type
-                        </label>
-                        <select
-                          value={strParams.spargerType}
-                          onChange={(e) =>
-                            onUpdateStrParams({
-                              ...strParams,
-                              spargerType: e.target.value as StirredTankPhysicsParams['spargerType'],
-                            })
-                          }
-                          className="w-full px-2 py-1.5 bg-white border border-slate-300"
-                        >
-                          <option value="open_pipe">Open-Pipe (Large Bubbles)</option>
-                          <option value="sintered_microsparger">15 μm Microsparger</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between font-medium text-slate-700 mb-1">
-                        <span>Inlet Oxygen Enrichment (%)</span>
-                        <span className="font-mono font-bold">
-                          {(strParams.oxygenEnrichmentFraction * 100).toFixed(0)}% O₂
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min={21}
-                        max={60}
-                        value={Math.round(strParams.oxygenEnrichmentFraction * 100)}
-                        onChange={(e) =>
-                          onUpdateStrParams({
-                            ...strParams,
-                            oxygenEnrichmentFraction: Number(e.target.value) / 100,
-                          })
-                        }
-                        className="w-full"
-                      />
-                    </div>
-
-                    {/* Dropdown for Hollow-Fibre Filter Hydraulics Controls */}
-                    <div className="pt-2 border-t border-slate-200">
-                      <button
-                        type="button"
-                        onClick={() => setShowFilterControlsDropdown((v) => !v)}
-                        className="w-full flex items-center justify-between py-1.5 font-semibold text-slate-800 hover:text-blue-700 cursor-pointer"
-                      >
-                        <span>
-                          Cell-Retention Filter Hydraulics (
-                          {isFilterViolated ? 'FAIL: Wall Shear High' : 'PASS'})
-                        </span>
-                        {showFilterControlsDropdown ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </button>
-
-                      {showFilterControlsDropdown && (
-                        <div className="mt-2 p-3 bg-white border border-slate-200 space-y-2.5">
-                          <p className="text-[11px] text-slate-600">
-                            Hollow-fibre filter wall shear depends on recirculation flow, lumen
-                            diameter, and parallel cartridge count — not reactor RPM.
-                          </p>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className="block text-[11px] font-medium text-slate-700">
-                                Parallel Cartridges
-                              </label>
-                              <select
-                                value={hfParams.parallelCartridgesCount ?? 1}
-                                onChange={(e) =>
-                                  onUpdateHfParams({
-                                    ...hfParams,
-                                    parallelCartridgesCount: Number(e.target.value) as 1 | 2 | 3,
-                                  })
-                                }
-                                className="w-full px-2 py-1 bg-slate-50 border border-slate-300 font-mono"
-                              >
-                                <option value={1}>1 Cartridge</option>
-                                <option value={2}>2 Cartridges (Halves Flow)</option>
-                                <option value={3}>3 Cartridges</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[11px] font-medium text-slate-700">
-                                Lumen Inner Diameter
-                              </label>
-                              <select
-                                value={hfParams.fibreInnerDiameterUm}
-                                onChange={(e) =>
-                                  onUpdateHfParams({
-                                    ...hfParams,
-                                    fibreInnerDiameterUm: Number(e.target.value),
-                                  })
-                                }
-                                className="w-full px-2 py-1 bg-slate-50 border border-slate-300 font-mono"
-                              >
-                                <option value={500}>500 μm (0.5 mm Standard)</option>
-                                <option value={750}>750 μm (0.75 mm Wide)</option>
-                                <option value={1000}>1000 μm (1.0 mm Low-Shear)</option>
-                              </select>
-                            </div>
-                          </div>
-                          {filterSuggestions[0] && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onUpdateHfParams(filterSuggestions[0].proposedHfParams)
-                              }
-                              className="w-full py-1.5 px-2.5 text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-800 cursor-pointer"
-                            >
-                              Apply Recommended Filter Fix ({filterSuggestions[0].title})
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
+                      Apply AI Recommended Fix (All Constraints)
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setActiveStage('optimise')}
-                    className="w-full py-2 px-3 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer flex items-center justify-center gap-1.5"
+                    className="px-3.5 py-1.5 text-xs font-semibold bg-blue-700 text-white hover:bg-blue-800 cursor-pointer"
                   >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Open AI Multi-Objective Optimiser (4. Optimise)</span>
+                    Compare Ranked Reactor Configurations →
                   </button>
                 </div>
               </div>
+
+              {/* Single Authoritative Interactive Animated Bioreactor & Multi-Objective Optimiser */}
+              <BioreactorProcessVisualiserPanel
+                strParams={strParams}
+                hfParams={hfParams}
+                groundedParams={groundedParams}
+                physics={physicsResult}
+                onUpdateStrParams={onUpdateStrParams}
+                onUpdateHfParams={onUpdateHfParams}
+                safetyGates={safetyGates}
+                onUpdateSafetyGate={onUpdateSafetyGate}
+              />
             </div>
           )}
 

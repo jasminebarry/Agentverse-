@@ -40,6 +40,7 @@ import {
 } from '../types/bioreact';
 import {
   DEFAULT_DOWNSTREAM_ECONOMICS,
+  FEASIBLE_500L_HF_PHYSICS,
   IMPELLER_GEOMETRY_SPECS,
 } from '../data/bioprocessData';
 
@@ -110,22 +111,35 @@ export function computeImpellerPowerAndRegime(
   const spec = IMPELLER_GEOMETRY_SPECS[strParams.impellerType];
 
   // Vessel dimensions derived from working volume and aspect ratio Z/D_T
-  const aspectRatioZDt = Math.max(0.8, strParams.aspectRatioZDt || 1.6);
+  const rawImpellerCount = Math.min(3, Math.max(1, Math.round(strParams.impellerCount || 1)));
+  const rawBottomClearance = Math.min(1.6, Math.max(0.35, strParams.bottomClearanceRatioC1Di ?? 0.90));
+  const rawSpacing =
+    rawImpellerCount === 1
+      ? 0.0
+      : Math.min(2.6, Math.max(0.55, strParams.impellerSpacingRatioDeltaCDi ?? 1.50));
+  const minSubmergedZDt =
+    (rawBottomClearance + (rawImpellerCount - 1) * rawSpacing + 0.56) *
+    (strParams.diameterRatioDiDt || 0.40);
+  const rawZDt = Math.max(0.8, strParams.aspectRatioZDt || 1.6);
+  const aspectRatioZDt =
+    rawImpellerCount === 3 && rawZDt >= 1.40
+      ? Math.max(rawZDt, Math.round(minSubmergedZDt * 100) / 100)
+      : rawZDt;
   const tankDiameterM = Math.pow(
     (4.0 * Math.max(1e-6, volumeM3)) / (Math.PI * aspectRatioZDt),
     1 / 3
   );
   const liquidHeightM = aspectRatioZDt * tankDiameterM;
 
-  // 1. User-adjusted or default literature reference turbulent N_p,0 (clamped to literature range)
-  const rawNp0 =
-    strParams.customTurbulentNp !== undefined && Number.isFinite(strParams.customTurbulentNp)
-      ? strParams.customTurbulentNp
-      : spec.defaultTurbulentNp0;
-  const turbulentReferenceNp0 = Math.min(
-    spec.literatureTurbulentNpRange[1],
-    Math.max(spec.literatureTurbulentNpRange[0], rawNp0)
-  );
+  // 1. User-adjusted or default literature reference turbulent N_p,0 (validated against current impeller's literature range)
+  const hasValidCustomNp =
+    strParams.customTurbulentNp !== undefined &&
+    Number.isFinite(strParams.customTurbulentNp) &&
+    strParams.customTurbulentNp >= spec.literatureTurbulentNpRange[0] &&
+    strParams.customTurbulentNp <= spec.literatureTurbulentNpRange[1];
+  const turbulentReferenceNp0 = hasValidCustomNp
+    ? strParams.customTurbulentNp!
+    : spec.defaultTurbulentNp0;
 
   // 2. Impeller Reynolds number Re = (rho * N * D_i^2) / mu
   const nRevPerSec = strParams.stirrerSpeedRpm / 60.0;
@@ -456,11 +470,24 @@ export function solveMassBalanceAndReactorPhysics(
 
   // 1. Stirred-Tank Vessel Geometry from Working Volume V (L) and Aspect Ratio Z/Dt
   const volumeM3 = strParams.workingVolumeL / 1000.0;
+  const rawImpCount = Math.min(3, Math.max(1, Math.round(strParams.impellerCount || 1)));
+  const rawC1 = Math.min(1.6, Math.max(0.35, strParams.bottomClearanceRatioC1Di ?? 0.90));
+  const rawDeltaC =
+    rawImpCount === 1
+      ? 0.0
+      : Math.min(2.6, Math.max(0.55, strParams.impellerSpacingRatioDeltaCDi ?? 1.50));
+  const minSubmergedZDt =
+    (rawC1 + (rawImpCount - 1) * rawDeltaC + 0.56) *
+    (strParams.diameterRatioDiDt || 0.40);
+  const effectiveAspectRatioZDt =
+    rawImpCount === 3 && strParams.aspectRatioZDt >= 1.40
+      ? Math.max(strParams.aspectRatioZDt, Math.round(minSubmergedZDt * 100) / 100)
+      : strParams.aspectRatioZDt;
   const tankDiameterM = Math.pow(
-    (4.0 * volumeM3) / (Math.PI * strParams.aspectRatioZDt),
+    (4.0 * volumeM3) / (Math.PI * effectiveAspectRatioZDt),
     1 / 3
   );
-  const liquidHeightM = strParams.aspectRatioZDt * tankDiameterM;
+  const liquidHeightM = effectiveAspectRatioZDt * tankDiameterM;
   const impellerDiameterM = strParams.diameterRatioDiDt * tankDiameterM;
   const crossSectionAreaM2 = (Math.PI / 4.0) * tankDiameterM * tankDiameterM;
 
@@ -583,10 +610,8 @@ export function solveMassBalanceAndReactorPhysics(
   const klaPerSecond = klaPerHour / 3600.0;
   const oxygenTransferTimeConstantS = 1.0 / Math.max(1e-5, klaPerSecond);
 
-  // Mixing becomes rate-limiting if tm > 60 s or tm > 2.2 * (1/kLa)
-  const isMixingRateLimiting =
-    mixingTimeGassedS > 60.0 ||
-    mixingTimeGassedS > 2.2 * oxygenTransferTimeConstantS;
+  // Mixing becomes rate-limiting if gassed bulk mixing time exceeds the 60.0 s CHO homogeneity ceiling
+  const isMixingRateLimiting = mixingTimeGassedS > 60.0;
 
   // Dissolved Oxygen Driving Force (mmol O2 / L)
   const hydrostaticFactor =
@@ -3340,6 +3365,10 @@ export function generateUncertaintyAwareNextExperiments(
     score: number;
   } | null = null;
 
+  const candidateHfParams: HollowFibrePhysicsParams = currentPhysics.isHfHydraulicsViolated
+    ? FEASIBLE_500L_HF_PHYSICS
+    : hfParams;
+
   const exploitationHardwareConfigs: Array<{
     impellerType: ImpellerType;
     impellerCount: 1 | 2 | 3;
@@ -3347,6 +3376,18 @@ export function generateUncertaintyAwareNextExperiments(
     vvm: number;
     o2Frac: number;
   }> = [
+    ...(currentPhysics.isScaleUpFeasible && strParams.spargerType === 'sintered_microsparger'
+      ? [
+          {
+            impellerType: strParams.impellerType,
+            impellerCount: Math.min(3, Math.max(1, strParams.impellerCount)) as 1 | 2 | 3,
+            rpm: strParams.stirrerSpeedRpm,
+            vvm: strParams.spargeRateVvm,
+            o2Frac: strParams.oxygenEnrichmentFraction,
+          },
+        ]
+      : []),
+    { impellerType: 'pitched_blade', impellerCount: 3, rpm: 96, vvm: 0.055, o2Frac: 0.60 },
     { impellerType: 'marine_axial', impellerCount: 2, rpm: 108, vvm: 0.045, o2Frac: 0.58 },
     { impellerType: 'marine_axial', impellerCount: 2, rpm: 118, vvm: 0.050, o2Frac: 0.62 },
     { impellerType: 'pitched_blade', impellerCount: 2, rpm: 86, vvm: 0.045, o2Frac: 0.55 },
@@ -3354,11 +3395,14 @@ export function generateUncertaintyAwareNextExperiments(
   ];
 
   for (const hw of exploitationHardwareConfigs) {
+    const hwSpec = IMPELLER_GEOMETRY_SPECS[hw.impellerType];
     const candStr: StirredTankPhysicsParams = {
       ...strParams,
       spargerType: 'sintered_microsparger',
       impellerType: hw.impellerType,
       impellerCount: hw.impellerCount,
+      aspectRatioZDt: hw.impellerCount === 3 ? Math.max(2.0, strParams.aspectRatioZDt) : strParams.aspectRatioZDt,
+      customTurbulentNp: hwSpec.defaultTurbulentNp0,
       stirrerSpeedRpm: hw.rpm,
       spargeRateVvm: hw.vvm,
       oxygenEnrichmentFraction: hw.o2Frac,
@@ -3366,7 +3410,7 @@ export function generateUncertaintyAwareNextExperiments(
     };
     for (const vvd of vvdGrid) {
       for (const doPct of doGrid) {
-        const phys = solveMassBalanceAndReactorPhysics(candStr, hfParams, groundedParams, vvd, doPct);
+        const phys = solveMassBalanceAndReactorPhysics(candStr, candidateHfParams, groundedParams, vvd, doPct);
         if (!phys.isScaleUpFeasible) continue;
         const pred = predictSurrogateAtPoint(vvd, doPct, observations, bestFeasibleY);
         const sim = evaluateProcessSimulation(
@@ -3438,11 +3482,14 @@ export function generateUncertaintyAwareNextExperiments(
   ];
 
   for (const hw of explorationHardwareConfigs) {
+    const hwSpec = IMPELLER_GEOMETRY_SPECS[hw.impellerType];
     const candStr: StirredTankPhysicsParams = {
       ...strParams,
       spargerType: 'sintered_microsparger',
       impellerType: hw.impellerType,
       impellerCount: hw.impellerCount,
+      aspectRatioZDt: hw.impellerCount === 3 ? Math.max(2.0, strParams.aspectRatioZDt) : strParams.aspectRatioZDt,
+      customTurbulentNp: hwSpec.defaultTurbulentNp0,
       stirrerSpeedRpm: hw.rpm,
       spargeRateVvm: hw.vvm,
       oxygenEnrichmentFraction: hw.o2Frac,
@@ -3457,7 +3504,7 @@ export function generateUncertaintyAwareNextExperiments(
         ) {
           continue;
         }
-        const phys = solveMassBalanceAndReactorPhysics(candStr, hfParams, groundedParams, vvd, doPct);
+        const phys = solveMassBalanceAndReactorPhysics(candStr, candidateHfParams, groundedParams, vvd, doPct);
         if (!phys.isScaleUpFeasible) continue;
         const pred = predictSurrogateAtPoint(vvd, doPct, observations, bestFeasibleY);
         if (pred.probFeasible < 0.65) continue;
@@ -3531,11 +3578,14 @@ export function generateUncertaintyAwareNextExperiments(
   ];
 
   for (const hw of tradeoffConfigs) {
+    const hwSpec = IMPELLER_GEOMETRY_SPECS[hw.impellerType];
     const candStr: StirredTankPhysicsParams = {
       ...strParams,
       spargerType: hw.spargerType,
       impellerType: hw.impellerType,
       impellerCount: hw.impellerCount,
+      aspectRatioZDt: hw.impellerCount === 3 ? Math.max(2.0, strParams.aspectRatioZDt) : strParams.aspectRatioZDt,
+      customTurbulentNp: hwSpec.defaultTurbulentNp0,
       stirrerSpeedRpm: hw.rpm,
       spargeRateVvm: hw.vvm,
       oxygenEnrichmentFraction: hw.o2Frac,
@@ -3543,7 +3593,7 @@ export function generateUncertaintyAwareNextExperiments(
     };
     for (const vvd of [1.65, 1.85, 2.05, 2.25]) {
       for (const doPct of [42, 46, 48, 52]) {
-        const phys = solveMassBalanceAndReactorPhysics(candStr, hfParams, groundedParams, vvd, doPct);
+        const phys = solveMassBalanceAndReactorPhysics(candStr, candidateHfParams, groundedParams, vvd, doPct);
         if (!phys.isScaleUpFeasible) continue;
         const pred = predictSurrogateAtPoint(vvd, doPct, observations, bestFeasibleY);
         const sim = evaluateProcessSimulation(
@@ -3864,10 +3914,7 @@ export function computeRadarLoadPercentages(
   const shearLoadPct =
     Math.round(((physics.estimatedShearStressPa / tauCrit) * 100) * 10) / 10;
 
-  const twoOverKlaS = Math.max(12.0, 2.0 * physics.oxygenTransferTimeConstantS);
-  const tmEffectiveLimit = physics.isMixingRateLimiting
-    ? Math.min(60.0, twoOverKlaS)
-    : 60.0;
+  const tmEffectiveLimit = 60.0;
   const mixingLoadPct =
     Math.round(((physics.mixingTimeGassedS / tmEffectiveLimit) * 100) * 10) / 10;
 
@@ -4047,13 +4094,13 @@ export function optimiseUnifiedReactorConfiguration(
       impellerSpacingRatioDeltaCDi: 1.50,
       bottomClearanceRatioC1Di: 0.90,
     },
-    // Branch 2: 3x Marine Hydrofoil + Sintered Microsparger (Tall aspect ratio Z/D_T = 1.90 for S_top/D_i >= 0.55)
+    // Branch 2: 3x Marine Hydrofoil + Sintered Microsparger (Tall aspect ratio Z/D_T = 2.00 for S_top/D_i >= 0.56)
     {
       branchId: '3x_marine_micro_tall',
       impellerType: 'marine_axial',
       impellerCount: 3,
       spargerType: 'sintered_microsparger',
-      aspectRatioZDt: 1.90,
+      aspectRatioZDt: 2.00,
       impellerSpacingRatioDeltaCDi: 1.50,
       bottomClearanceRatioC1Di: 0.85,
     },
@@ -4073,7 +4120,7 @@ export function optimiseUnifiedReactorConfiguration(
       impellerType: 'pitched_blade',
       impellerCount: 3,
       spargerType: 'sintered_microsparger',
-      aspectRatioZDt: 1.90,
+      aspectRatioZDt: 2.00,
       impellerSpacingRatioDeltaCDi: 1.50,
       bottomClearanceRatioC1Di: 0.85,
     },

@@ -1399,8 +1399,21 @@ export const UnifiedWorkbenchHomePanel: React.FC<UnifiedWorkbenchHomePanelProps>
                   <div className="text-[11px] text-slate-600 mt-0.5">
                     500 L Perfusion STR:{' '}
                     {physicsResult.isScaleUpFeasible
-                      ? 'All 4 physics constraints PASS'
-                      : 'Bottleneck detected (see Reactor Visualiser)'}
+                      ? 'All physics constraints PASS'
+                      : `Bottleneck detected (${[
+                          physicsResult.otrMmolPerLHour < physicsResult.ourMmolPerLHour ? 'OTR < OUR' : null,
+                          physicsResult.estimatedShearStressPa > 1.65 || physicsResult.kolmogorovScaleUm < 18.0
+                            ? 'Impeller Shear / Eddy'
+                            : null,
+                          physicsResult.isMixingRateLimiting ? 'Mixing Time > 60 s' : null,
+                          physicsResult.isHfHydraulicsViolated ? 'Filter Shear / ΔP' : null,
+                          strParams.spargeRateVvm > 0.095 || strParams.spargeRateVvm < 0.018
+                            ? 'Superficial Gas Flow'
+                            : null,
+                          physicsResult.isTopSubmergenceInsufficient ? 'Impeller Submergence' : null,
+                        ]
+                          .filter(Boolean)
+                          .join(', ')})`}
                   </div>
                 </td>
                 <td className="p-3 font-mono">

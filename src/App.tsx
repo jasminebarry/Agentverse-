@@ -5,7 +5,9 @@ import {
   DEFAULT_ENGINEERING_CONSTRAINTS,
   DEFAULT_HF_PHYSICS,
   DEFAULT_STR_PHYSICS,
+  FEASIBLE_500L_HF_PHYSICS,
   FEASIBLE_500L_STR_PHYSICS,
+  IMPELLER_GEOMETRY_SPECS,
   INITIAL_MEASURED_BENCHMARKS,
   INITIAL_SAFETY_GATES,
   NOVEL_PROTEIN_PRESETS,
@@ -350,6 +352,50 @@ export default function App() {
     strParams.workingVolumeL,
   ]);
 
+  const handleUpdateStrParams = useCallback(
+    (next: StirredTankPhysicsParams) => {
+      setStrParams((prev) => {
+        const spec = IMPELLER_GEOMETRY_SPECS[next.impellerType];
+        const impellerChanged = next.impellerType !== prev.impellerType;
+        const hasValidCustomNp =
+          !impellerChanged &&
+          next.customTurbulentNp !== undefined &&
+          Number.isFinite(next.customTurbulentNp) &&
+          next.customTurbulentNp >= spec.literatureTurbulentNpRange[0] &&
+          next.customTurbulentNp <= spec.literatureTurbulentNpRange[1];
+        const resolvedNp = hasValidCustomNp
+          ? next.customTurbulentNp
+          : spec.defaultTurbulentNp0;
+
+        const resolvedAspectRatio =
+          next.impellerCount === 3 &&
+          prev.impellerCount !== 3 &&
+          next.aspectRatioZDt < 1.98
+            ? 2.0
+            : next.aspectRatioZDt;
+
+        return {
+          ...next,
+          customTurbulentNp: resolvedNp,
+          aspectRatioZDt: resolvedAspectRatio,
+        };
+      });
+      setHfParams((prevHf) =>
+        prevHf.oxygenEnrichmentFraction !== next.oxygenEnrichmentFraction
+          ? {
+              ...prevHf,
+              oxygenEnrichmentFraction: next.oxygenEnrichmentFraction,
+            }
+          : prevHf
+      );
+    },
+    []
+  );
+
+  const handleUpdateHfParams = useCallback((next: HollowFibrePhysicsParams) => {
+    setHfParams(next);
+  }, []);
+
   const handleTriggerOxygenDeficitDemo = useCallback(() => {
     setStrParams({
       ...DEFAULT_STR_PHYSICS,
@@ -360,10 +406,12 @@ export default function App() {
       oxygenEnrichmentFraction: 0.21,
       targetVcdE6PerMl: 43.5,
     });
+    setHfParams(DEFAULT_HF_PHYSICS);
   }, []);
 
   const handleApplyFeasible500LConfig = useCallback(() => {
     setStrParams(FEASIBLE_500L_STR_PHYSICS);
+    setHfParams(FEASIBLE_500L_HF_PHYSICS);
   }, []);
 
   // Stage 3: Constrained Bayesian Optimisation State
@@ -589,42 +637,76 @@ export default function App() {
 
   const handleApplyExperimentHardwareToStage5 = useCallback(
     (recipe: ProposedNextExperimentRecipe) => {
+      const spec = IMPELLER_GEOMETRY_SPECS[recipe.operatingVector.impellerType];
+      const o2Frac = recipe.operatingVector.inletO2Percent / 100.0;
       setStrParams((prev) => ({
         ...prev,
         workingVolumeL: recipe.operatingVector.workingVolumeL,
         spargerType: recipe.operatingVector.spargerType,
         impellerType: recipe.operatingVector.impellerType,
         impellerCount: recipe.operatingVector.impellerCount,
+        aspectRatioZDt:
+          recipe.operatingVector.impellerCount === 3
+            ? Math.max(2.0, prev.aspectRatioZDt)
+            : prev.aspectRatioZDt,
+        customTurbulentNp: spec.defaultTurbulentNp0,
         stirrerSpeedRpm: recipe.operatingVector.agitationRpm,
         spargeRateVvm: recipe.operatingVector.spargeRateVvm,
-        oxygenEnrichmentFraction: recipe.operatingVector.inletO2Percent / 100.0,
+        oxygenEnrichmentFraction: o2Frac,
         targetVcdE6PerMl: recipe.operatingVector.targetVcdE6PerMl,
         klaMode: 'calculated_vant_riet',
       }));
+      setHfParams((prevHf) =>
+        physicsResult.isHfHydraulicsViolated
+          ? {
+              ...FEASIBLE_500L_HF_PHYSICS,
+              oxygenEnrichmentFraction: o2Frac,
+            }
+          : {
+              ...prevHf,
+              oxygenEnrichmentFraction: o2Frac,
+            }
+      );
     },
-    []
+    [physicsResult.isHfHydraulicsViolated]
   );
 
   const handleExecuteReviewedExperimentInBo = useCallback(
     (
       recipe: ProposedNextExperimentRecipe,
-      reviewerName: string,
-      reviewerNotes: string
+      _reviewerName: string,
+      _reviewerNotes: string
     ) => {
-      // Apply proposed hardware vector to Stage 5 vessel
+      const spec = IMPELLER_GEOMETRY_SPECS[recipe.operatingVector.impellerType];
+      const o2Frac = recipe.operatingVector.inletO2Percent / 100.0;
       setStrParams((prev) => ({
         ...prev,
         workingVolumeL: recipe.operatingVector.workingVolumeL,
         spargerType: recipe.operatingVector.spargerType,
         impellerType: recipe.operatingVector.impellerType,
         impellerCount: recipe.operatingVector.impellerCount,
+        aspectRatioZDt:
+          recipe.operatingVector.impellerCount === 3
+            ? Math.max(2.0, prev.aspectRatioZDt)
+            : prev.aspectRatioZDt,
+        customTurbulentNp: spec.defaultTurbulentNp0,
         stirrerSpeedRpm: recipe.operatingVector.agitationRpm,
         spargeRateVvm: recipe.operatingVector.spargeRateVvm,
-        oxygenEnrichmentFraction: recipe.operatingVector.inletO2Percent / 100.0,
+        oxygenEnrichmentFraction: o2Frac,
         targetVcdE6PerMl: recipe.operatingVector.targetVcdE6PerMl,
         klaMode: 'calculated_vant_riet',
       }));
-      // Evaluate the proposed (VVD, DO%, Temp) in the simulator and append to GP observations
+      setHfParams((prevHf) =>
+        physicsResult.isHfHydraulicsViolated
+          ? {
+              ...FEASIBLE_500L_HF_PHYSICS,
+              oxygenEnrichmentFraction: o2Frac,
+            }
+          : {
+              ...prevHf,
+              oxygenEnrichmentFraction: o2Frac,
+            }
+      );
       setObservations((prev) => {
         const nextObs = suggestAndRunNextExperiment(
           prev,
@@ -640,7 +722,7 @@ export default function App() {
         return [...prev, nextObs];
       });
     },
-    [groundedParams, selectedReactor]
+    [groundedParams, selectedReactor, physicsResult.isHfHydraulicsViolated]
   );
 
   const handleTriggerAbstentionDemo = useCallback(() => {
@@ -1471,8 +1553,8 @@ export default function App() {
             strParams={strParams}
             hfParams={hfParams}
             physicsResult={physicsResult}
-            onUpdateStrParams={setStrParams}
-            onUpdateHfParams={setHfParams}
+            onUpdateStrParams={handleUpdateStrParams}
+            onUpdateHfParams={handleUpdateHfParams}
             onTriggerOxygenDeficitDemo={handleTriggerOxygenDeficitDemo}
             selectedReactor={selectedReactor}
             observations={observations}
@@ -1611,7 +1693,9 @@ export default function App() {
                 {currentStageGate.id !== 'gate1_candidate' &&
                 (!physicsResult.isScaleUpFeasible ||
                   physicsResult.oxygenMarginMmolPerLHour < 0)
-                  ? 'Approval Blocked (OTR < OUR)'
+                  ? physicsResult.oxygenMarginMmolPerLHour < 0
+                    ? 'Approval Blocked (OTR < OUR)'
+                    : 'Approval Blocked (Constraint Violated)'
                   : 'Approve'}
               </button>
               <button
@@ -1671,7 +1755,7 @@ export default function App() {
               novelProfile={novelProfile}
               novelEvaluation={novelEvaluation}
               strParams={strParams}
-              onUpdateStrParams={setStrParams}
+              onUpdateStrParams={handleUpdateStrParams}
               physics={physicsResult}
               downstreamCogs={downstreamCogs}
               safetyGates={safetyGates}
@@ -1730,7 +1814,7 @@ export default function App() {
               candidatePathwayMode={candidatePathwayMode}
               onChangePathwayMode={setCandidatePathwayMode}
               strParams={strParams}
-              onUpdateStrParams={setStrParams}
+              onUpdateStrParams={handleUpdateStrParams}
               novelProfile={novelProfile}
               novelPresets={NOVEL_PROTEIN_PRESETS}
               onUpdateNovelProfile={setNovelProfile}
@@ -1857,8 +1941,8 @@ export default function App() {
             groundedParams={groundedParams}
             strParams={strParams}
             hfParams={hfParams}
-            onUpdateStrParams={setStrParams}
-            onUpdateHfParams={setHfParams}
+            onUpdateStrParams={handleUpdateStrParams}
+            onUpdateHfParams={handleUpdateHfParams}
             onNavigateToOptimiser={() => setActiveSection('optimiser')}
             safetyGates={safetyGates}
             onUpdateSafetyGate={handleUpdateSafetyGate}

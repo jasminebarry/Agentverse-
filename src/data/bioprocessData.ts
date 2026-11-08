@@ -1,4 +1,4 @@
-import {
+import type {
   BiologicCandidate,
   DatabaseStreamRecord,
   DownstreamEconomicParams,
@@ -13,7 +13,7 @@ import {
   ReactorConfiguration,
   StirredTankPhysicsParams,
   WorkflowTimelineStep,
-} from '../types/bioreact';
+} from '../types/bioreact.ts';
 
 export const BIOLOGIC_CANDIDATES: BiologicCandidate[] = [
   {
