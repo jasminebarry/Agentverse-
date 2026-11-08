@@ -5,13 +5,10 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
-  BookOpen,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
   RotateCcw,
   ShieldAlert,
-  ShieldCheck,
   Sliders,
   Sparkles,
   UserCheck,
@@ -38,21 +35,18 @@ import {
   SafetyGateId,
   SafetyGateStatus,
   StirredTankPhysicsParams,
-  CellRetentionFiltrationMode,
 } from '../types/bioreact';
 import {
   DEFAULT_HF_PHYSICS,
   DEFAULT_STR_PHYSICS,
-  IMPELLER_GEOMETRY_SPECS,
 } from '../data/bioprocessData';
 import {
-  CLOSED_LOOP_DATASETS,
   PROTEIN_TARGETS_3D,
   ProteinTarget3DConfig,
+  evaluateSmilesWithCritics,
   getModesForSmiles,
 } from '../data/dissertationDockingData';
 import {
-  computeRadarLoadPercentages,
   formatCogsHeadline,
   optimiseUnifiedReactorConfiguration,
   solveMassBalanceAndReactorPhysics,
@@ -65,9 +59,186 @@ import {
   InitialDrugTargetIntakePanel,
 } from './InitialDrugTargetIntakePanel';
 
-export type GuidedDemoStep = 1 | 2 | 3 | 4;
+export type UnifiedFlowStage =
+  | 'discover'
+  | 'evaluate'
+  | 'manufacture'
+  | 'optimise'
+  | 'next_experiments';
+
+export type ClassifiedModalityId =
+  | 'chemical_synthesis'
+  | 'mammalian_cho_bioreactor'
+  | 'microbial_fermentation'
+  | 'insufficient_evidence_abstain';
+
+export interface PassedCandidateOption {
+  id: string;
+  name: string;
+  targetSymbol: string;
+  targetRolePlain: string;
+  presetKey: string;
+  screeningStatus: 'PASSED' | 'PRELIMINARY' | 'REJECTED';
+  molecularSummary: string;
+  bindingSummary: string;
+  autoClassifiedModality: ClassifiedModalityId;
+  modalityLabel: string;
+  supportStatus: 'Supported (Full Model)' | 'Preliminary (Screening Only)' | 'Not Yet Supported';
+  autoClassificationReasoning: string;
+  estimatedStepsOrProcess: string;
+  estimatedCostAndTime: string;
+  prosSummary: string;
+  consAndRisks: string;
+  missingEvidence: string;
+  nextExperiments: string[];
+}
+
+export const PASSED_CANDIDATE_GALLERY: PassedCandidateOption[] = [
+  {
+    id: 'mrp1_r2_lead_1',
+    name: 'R2-Lead-1 (Achiral Biphenyl Sulfonamide)',
+    targetSymbol: 'MRP1 (ABCC1)',
+    targetRolePlain: 'Drug-efflux pump that removes chemotherapy drugs from cells',
+    presetKey: 'mrp1_mk571_small_molecule',
+    screeningStatus: 'PASSED',
+    molecularSummary: '412 Da small molecule · 0 chiral centres · SA score 2.64',
+    bindingSummary: '−10.82 kcal/mol predicted pocket fit (vs. MK-571 −9.10 kcal/mol)',
+    autoClassifiedModality: 'chemical_synthesis',
+    modalityLabel: 'Small-Molecule Chemical Synthesis',
+    supportStatus: 'Supported (Full Model)',
+    autoClassificationReasoning:
+      'Molecular weight is 412 Da (< 900 Da), structure is an achiral organic sulfonamide with zero peptide bonds or glycosylation sites. Synthesised via 3-step organic chemistry; does not require living cells or a bioreactor.',
+    estimatedStepsOrProcess: '3 synthetic steps (Suzuki coupling + sulfonamide condensation)',
+    estimatedCostAndTime: '~$1.2k–$2.5k per 10 g batch · ~2–3 weeks (heuristic estimate)',
+    prosSummary:
+      'Stronger predicted pocket fit than MK-571; zero chiral centres; simple 3-step convergent synthesis.',
+    consAndRisks:
+      'Docking predicts pocket fit only — does not prove functional MRP1 pump inhibition or intracellular drug retention.',
+    missingEvidence:
+      'Wet-lab synthesis yield, vesicular MRP1 transport IC₅₀, and cellular drug-retention assay.',
+    nextExperiments: [
+      'Synthesise 50–100 mg via the 3-step Suzuki/sulfonamide route and verify ≥95% purity by LC-MS/NMR.',
+      'Measure direct MRP1 binding and ATP-dependent vesicular transport inhibition against MK-571 control.',
+      'Run intracellular drug-retention assay (calcein-AM / daunorubicin accumulation) in MRP1-expressing cells.',
+    ],
+  },
+  {
+    id: 'egfr_biaryl_lead_2',
+    name: 'EGFR-Biaryl-Lead-2 (Reversible Kinase Lead)',
+    targetSymbol: 'EGFR (T790M)',
+    targetRolePlain: 'Mutant growth-factor receptor kinase in lung cancer cells',
+    presetKey: 'egfr_osimertinib_small_molecule',
+    screeningStatus: 'PASSED',
+    molecularSummary: '428 Da small molecule · 0 chiral centres · SA score 2.71',
+    bindingSummary: '−10.40 kcal/mol predicted ATP-cleft fit (vs. Osimertinib −9.80 kcal/mol)',
+    autoClassifiedModality: 'chemical_synthesis',
+    modalityLabel: 'Small-Molecule Chemical Synthesis',
+    supportStatus: 'Supported (Full Model)',
+    autoClassificationReasoning:
+      'Low-molecular-weight organic scaffold (428 Da) with no biological post-translational modifications. Appropriately manufactured via batch organic synthesis.',
+    estimatedStepsOrProcess: '3 synthetic steps (achiral cross-coupling route)',
+    estimatedCostAndTime: '~$1.5k–$3.0k per 10 g batch · ~2–3 weeks (heuristic estimate)',
+    prosSummary:
+      'Passes all synthesisability and process-chemistry structural alert critics.',
+    consAndRisks:
+      'Selectivity over wild-type EGFR and cellular phosphorylation IC₅₀ remain unmeasured.',
+    missingEvidence:
+      'Kinase panel selectivity and cellular p-EGFR inhibition.',
+    nextExperiments: [
+      'Synthesise 50 mg batch via 3-step biaryl coupling route.',
+      'Run biochemical EGFR (T790M vs. WT) kinase inhibition assay.',
+      'Test cellular viability and phosphorylation inhibition in H1975 cells.',
+    ],
+  },
+  {
+    id: 'her2_trastuzumab_mab',
+    name: 'Trastuzumab (Herceptin · 145.5 kDa IgG1)',
+    targetSymbol: 'HER2 (ERBB2)',
+    targetRolePlain: 'Extracellular cell-surface growth receptor on HER2+ tumours',
+    presetKey: 'her2_trastuzumab_biologic',
+    screeningStatus: 'PASSED',
+    molecularSummary: '145,531 Da heterotetrameric IgG1 antibody · 16 disulfide bonds + Fc N-glycan',
+    bindingSummary: 'Measured K_D = 0.5 nM on HER2 extracellular domain IV (PDB: 1N8Z)',
+    autoClassifiedModality: 'mammalian_cho_bioreactor',
+    modalityLabel: 'Mammalian Cell Biomanufacturing (500 L CHO Bioreactor)',
+    supportStatus: 'Supported (Full Model)',
+    autoClassificationReasoning:
+      '145.5 kDa multi-chain protein requiring complex heterotetrameric disulfide assembly and human-like Asn297 Fc glycosylation. Cannot be chemically synthesised; requires mammalian CHO suspension culture.',
+    estimatedStepsOrProcess: '14-day 500 L CHO Perfusion culture + Protein A / IEX purification',
+    estimatedCostAndTime: '~$68–$95 / g drug substance · ~6–8 week campaign (synthetic cost model)',
+    prosSummary:
+      'Clinically validated HER2 binder; full 500 L oxygen, shear, mixing, and hollow-fibre physics modelled.',
+    consAndRisks:
+      'Initial 500 L open-pipe bioreactor setup fails oxygen transfer (OTR 5.1 < OUR 13.9 mmol/L/h) and filter wall shear.',
+    missingEvidence:
+      'Pilot 500 L perfusion verification with 15 μm microsparger and 35% O₂ enrichment.',
+    nextExperiments: [
+      'Switch sparger from open-pipe to 15 μm sintered microsparger and increase inlet O₂ to 35% to close OTR ≥ OUR.',
+      'Increase hollow-fibre cartridge count to 2 modules (2.0 mm lumen) to keep lumen wall shear below 1.65 Pa.',
+      'Run Ranked Bayesian Optimisation Recipe #1 (Perfusion 2.1 VVD, DO 42%, 95 RPM) with human safety sign-off.',
+    ],
+  },
+  {
+    id: 'mrp1_scfv_microbial',
+    name: 'Novel Anti-MRP1 scFv Fragment (Research Stage)',
+    targetSymbol: 'MRP1 (ABCC1)',
+    targetRolePlain: 'Single-chain antibody fragment targeting MRP1',
+    presetKey: 'mrp1_mk571_small_molecule',
+    screeningStatus: 'PRELIMINARY',
+    molecularSummary: '28.4 kDa single-chain variable fragment · 2 disulfide bonds · No glycosylation',
+    bindingSummary: 'Hypothesised binder — experimental K_D not yet measured',
+    autoClassifiedModality: 'microbial_fermentation',
+    modalityLabel: 'Microbial Precision Fermentation (E. coli / K. phaffii)',
+    supportStatus: 'Preliminary (Screening Only)',
+    autoClassificationReasoning:
+      '28.4 kDa recombinant protein with no N-linked glycosylation requirement. Suitable for microbial fermentation screening, but bioREACT abstains from quantitative bioreactor optimisation until wet-lab kinetics (q_p, q_O2, μ_max) are supplied.',
+    estimatedStepsOrProcess: 'Microbial fed-batch expression + periplasmic/affinity capture',
+    estimatedCostAndTime: 'Not yet supported — requires experimental expression titre & kinetics',
+    prosSummary:
+      'Avoids mammalian cell culture cost if soluble expression succeeds.',
+    consAndRisks:
+      'High risk of inclusion body aggregation; no measured kinetic parameters available yet.',
+    missingEvidence:
+      'Shake-flask expression titre, soluble folding yield, and specific oxygen uptake rate (q_O2).',
+    nextExperiments: [
+      'Perform small-scale E. coli and K. phaffii expression screening to measure soluble titre.',
+      'Measure specific productivity (q_p) and oxygen uptake (q_O2) to unlock quantitative bioreactor modelling.',
+    ],
+  },
+  {
+    id: 'mrp1_r1_c01_rejected',
+    name: 'R1-C01 (Raw Docking Winner — Rejected by Critics)',
+    targetSymbol: 'MRP1 (ABCC1)',
+    targetRolePlain: 'Drug-efflux pump (illustrates why high docking score ≠ practical drug)',
+    presetKey: 'mrp1_mk571_small_molecule',
+    screeningStatus: 'REJECTED',
+    molecularSummary: '684 Da strained polyphenolic C-glycoside · 7 chiral centres · SA score 6.42',
+    bindingSummary: '−12.90 kcal/mol raw Vina score (strongest in-silico score, but unbuildable)',
+    autoClassifiedModality: 'chemical_synthesis',
+    modalityLabel: 'Small-Molecule Chemical Synthesis (Flagged Impractical)',
+    supportStatus: 'Supported (Full Model)',
+    autoClassificationReasoning:
+      'Although R1-C01 has the strongest raw docking score (−12.90 kcal/mol), bioREACT’s synthesisability and process-chemistry critics reject it due to 7 stereocentres (128 stereoisomers) and ~12–18 synthetic steps.',
+    estimatedStepsOrProcess: '12–18 steps with multiple chiral separations (Rejected)',
+    estimatedCostAndTime: '>$20k–$40k per 10 g · ~10–14 weeks (impractical for lead discovery)',
+    prosSummary:
+      'Highest raw computational docking score in the MRP1 pocket.',
+    consAndRisks:
+      'Severe synthetic bottleneck; high risk of failed synthesis and poor cellular permeability.',
+    missingEvidence:
+      'Not recommended for synthesis — replaced by practical achiral lead R2-Lead-1.',
+    nextExperiments: [
+      'Do not advance R1-C01 to wet-lab synthesis.',
+      'Select passed candidate R2-Lead-1 (−10.82 kcal/mol, 0 chiral centres, 3 steps) instead.',
+    ],
+  },
+];
 
 interface GuidedDemoModePanelProps {
+  intakeState: DrugTargetKnownBinderIntakeState;
+  onUpdateIntakeState: (next: DrugTargetKnownBinderIntakeState) => void;
+  customTarget3D: ProteinTarget3DConfig | null;
+  onUpdateCustomTarget3D: (next: ProteinTarget3DConfig | null) => void;
   candidate: BiologicCandidate;
   allBiologicCandidates: BiologicCandidate[];
   onSelectCandidate: (candidateId: string) => void;
@@ -114,11 +285,6 @@ const ELEMENT_COLORS: Record<string, number> = {
   P: 0xf97316,
 };
 
-type Step1ShowcaseSelection =
-  | 'route_a_mrp1_lead'
-  | 'route_a_mrp1_failed_hit'
-  | 'route_b_her2_trastuzumab';
-
 const DEMO_OBJECTIVE_PRESETS: Record<
   ReactorOptimisationObjectivePresetId,
   {
@@ -130,7 +296,7 @@ const DEMO_OBJECTIVE_PRESETS: Record<
   balanced_all_constraints: {
     label: 'Balanced All-Round (Recommended)',
     plainDesc:
-      'Solves oxygen supply while reducing mixing time, filter pressure drop, and cell shear together.',
+      'Solves oxygen supply while reducing mixing time, filter wall shear, and cell shear together.',
     weights: {
       minimiseMixingTime: 85,
       minimiseFilterPressureDrop: 85,
@@ -140,7 +306,7 @@ const DEMO_OBJECTIVE_PRESETS: Record<
     },
   },
   minimise_mixing_and_filter_dp: {
-    label: 'Fastest Mixing & Lowest Filter Pressure',
+    label: 'Fastest Mixing & Lowest Filter Shear',
     plainDesc:
       'Prioritises rapid vessel homogenisation (t_m < 35 s) and low hollow-fibre pressure drop.',
     weights: {
@@ -190,10 +356,13 @@ const DEMO_OBJECTIVE_PRESETS: Record<
 };
 
 export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
+  intakeState,
+  onUpdateIntakeState: setIntakeState,
+  customTarget3D,
+  onUpdateCustomTarget3D: setCustomTarget3D,
   candidate,
   allBiologicCandidates,
   onSelectCandidate,
-  candidatePathwayMode,
   onChangePathwayMode,
   groundedParams,
   strParams,
@@ -206,191 +375,116 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
   downstreamEcon,
   downstreamCogs,
   safetyGates,
-  onUpdateSafetyGate,
   onApproveAllDemoGates,
-  records,
   prismaIncludedCount,
-  provenanceLedger,
   liveEightSeedSummary,
   onSwitchToWorkbenchSection,
 }) => {
-  const [activeStep, setActiveStep] = useState<GuidedDemoStep>(1);
+  // Unified 5-Stage Candidate-Centred Flow
+  const [activeStage, setActiveStage] = useState<UnifiedFlowStage>('discover');
 
-  // Expandable "Scientific Details" / "Show Scientific Reasoning" toggles per step
-  const [showStep1Details, setShowStep1Details] = useState<boolean>(false);
-  const [showStep2Reasoning, setShowStep2Reasoning] = useState<boolean>(false);
-  const [showStep3Details, setShowStep3Details] = useState<boolean>(false);
-  const [showStep4Details, setShowStep4Details] = useState<boolean>(false);
-
-  // Step 1: Initial Drug, Target Protein, Receptor & Known Binder Intake + 3D Viewer State
-  const [intakeState, setIntakeState] =
-    useState<DrugTargetKnownBinderIntakeState>(() =>
-      candidatePathwayMode === 'small_molecule_chemical'
-        ? INITIAL_DRUG_TARGET_PRESETS.mrp1_mk571_small_molecule
-        : INITIAL_DRUG_TARGET_PRESETS.her2_trastuzumab_biologic
-    );
-  const [customTarget3D, setCustomTarget3D] =
-    useState<ProteinTarget3DConfig | null>(null);
-  const [step1Selection, setStep1Selection] = useState<Step1ShowcaseSelection>(
-    candidatePathwayMode === 'small_molecule_chemical'
-      ? 'route_a_mrp1_lead'
-      : 'route_b_her2_trastuzumab'
+  // Selected candidate from the Passed Candidates gallery
+  const [selectedGalleryId, setSelectedGalleryId] = useState<string>(
+    intakeState.pathwayRoute === 'route_b_biologic'
+      ? 'her2_trastuzumab_mab'
+      : 'mrp1_r2_lead_1'
   );
-  const [selectedPoseMode, setSelectedPoseMode] = useState<number>(1);
+
+  // Researcher Modality Override (null = use automatic classification)
+  const [researcherModalityOverride, setResearcherModalityOverride] =
+    useState<ClassifiedModalityId | null>(null);
+
+  // Progressive Disclosure Dropdowns (Keep default UI super clean and uncluttered!)
+  const [showCustomInputForm, setShowCustomInputForm] = useState<boolean>(false);
+  const [showScientificDetailsDropdown, setShowScientificDetailsDropdown] =
+    useState<boolean>(false);
+  const [showFilterControlsDropdown, setShowFilterControlsDropdown] =
+    useState<boolean>(false);
+
+  // 3D Viewer Controls
   const [showPocketSurface, setShowPocketSurface] = useState<boolean>(true);
   const [showContactSticks, setShowContactSticks] = useState<boolean>(true);
   const [cameraResetTick, setCameraResetTick] = useState<number>(0);
   const viewerMountRef = useRef<HTMLDivElement | null>(null);
 
-  // Step 2: Expandable Cell-Retention Filter Settings & Filter Intervention Suggestions
-  const [showFilterSettingsPanel, setShowFilterSettingsPanel] =
-    useState<boolean>(true);
-  const [showFilterSuggestionsPanel, setShowFilterSuggestionsPanel] =
-    useState<boolean>(false);
-  const [lastAppliedFilterOptId, setLastAppliedFilterOptId] = useState<
-    string | null
-  >(null);
-
-  // Step 3: "Ask bioREACT What to Test Next" State
+  // Optimiser Preset
   const [activePresetId, setActivePresetId] =
     useState<ReactorOptimisationObjectivePresetId>('balanced_all_constraints');
-  const [recalcCount, setRecalcCount] = useState<number>(1);
-  const [lastAppliedConfigId, setLastAppliedConfigId] = useState<string | null>(null);
-
-  // Step 4: Reviewer Name for Human Approval Gate
+  const [lastAppliedConfigId, setLastAppliedConfigId] = useState<string | null>(
+    null
+  );
   const [reviewerName, setReviewerName] = useState<string>(
     'Simulated Demo Reviewer — Bioprocess Engineer'
   );
 
-  // Live Filter-Specific Intervention Options (Step 2)
-  const filterSuggestions = useMemo(
+  const selectedCandidateCard = useMemo(
     () =>
-      suggestFilterHydraulicImprovements(
-        strParams,
-        hfParams,
-        groundedParams,
-        groundedParams.optimalVvd,
-        groundedParams.optimalDoPercent
-      ),
-    [strParams, hfParams, groundedParams]
+      PASSED_CANDIDATE_GALLERY.find((c) => c.id === selectedGalleryId) ||
+      PASSED_CANDIDATE_GALLERY[0],
+    [selectedGalleryId]
   );
 
-  // Baseline 500 L Open-Pipe Air Deficit Reference for Before/After comparison
-  const baseline500LStrParams: StirredTankPhysicsParams = useMemo(
-    () => ({
-      ...DEFAULT_STR_PHYSICS,
-      workingVolumeL: 500,
-      spargerType: 'open_pipe',
-      impellerType: 'marine_axial',
-      impellerCount: 2,
-      stirrerSpeedRpm: 115,
-      spargeRateVvm: 0.04,
-      oxygenEnrichmentFraction: 0.21,
-      targetVcdE6PerMl: 43.5,
-    }),
-    []
+  const effectiveModality: ClassifiedModalityId =
+    researcherModalityOverride || selectedCandidateCard.autoClassifiedModality;
+
+  // Live Critic Evaluation of Current Candidate SMILES
+  const liveCandidateCritic = useMemo(
+    () => evaluateSmilesWithCritics(intakeState.candidateSmiles || 'c1ccccc1'),
+    [intakeState.candidateSmiles]
   );
 
-  const baselinePhysics = useMemo(
-    () =>
-      solveMassBalanceAndReactorPhysics(
-        baseline500LStrParams,
-        DEFAULT_HF_PHYSICS,
-        groundedParams,
-        groundedParams.optimalVvd,
-        groundedParams.optimalDoPercent
-      ),
-    [baseline500LStrParams, groundedParams]
-  );
+  // Select a candidate from the Passed Candidates Gallery and sync all state
+  const handleSelectGalleryCandidate = (item: PassedCandidateOption) => {
+    setSelectedGalleryId(item.id);
+    setResearcherModalityOverride(null);
+    const preset = INITIAL_DRUG_TARGET_PRESETS[item.presetKey];
+    if (preset) {
+      setIntakeState(preset);
+    }
+    setCustomTarget3D(null);
+    if (item.autoClassifiedModality === 'mammalian_cho_bioreactor') {
+      onChangePathwayMode('established_biologic');
+      onSelectCandidate('trastuzumab');
+    } else if (item.autoClassifiedModality === 'microbial_fermentation') {
+      onChangePathwayMode('novel_dissertation_protein');
+    } else {
+      onChangePathwayMode('small_molecule_chemical');
+    }
+    setCameraResetTick((t) => t + 1);
+  };
 
-  const currentRadarLoads = useMemo(
-    () => computeRadarLoadPercentages(strParams, groundedParams, physicsResult),
-    [strParams, groundedParams, physicsResult]
-  );
-
-  // Live Unified Multi-Objective Optimiser Suite (Step 3)
-  const activeWeights = DEMO_OBJECTIVE_PRESETS[activePresetId].weights;
-  const unifiedSuite = useMemo(
-    () =>
-      optimiseUnifiedReactorConfiguration(
-        strParams,
-        hfParams,
-        groundedParams,
-        activeWeights,
-        downstreamEcon
-      ),
-    [strParams, hfParams, groundedParams, activeWeights, downstreamEcon]
-  );
-
-  // Pull real MRP1 docked small molecules from CLOSED_LOOP_DATASETS
-  const mrp1LeadCandidate = useMemo(() => {
-    const shortlist = CLOSED_LOOP_DATASETS.cache.final_shortlist;
-    return (
-      shortlist.find((c) => c.dock_affinity <= -10.8) ||
-      shortlist[0] ||
-      CLOSED_LOOP_DATASETS.cache.rounds[1].candidates[0]
-    );
-  }, []);
-
-  const mrp1FailedHit = useMemo(() => {
-    const round1 = CLOSED_LOOP_DATASETS.cache.rounds[0]?.candidates || [];
-    return (
-      round1.find((c) => c.overall_verdict === 'fail') ||
-      round1[0] ||
-      mrp1LeadCandidate
-    );
-  }, [mrp1LeadCandidate]);
-
-  const activeTarget3D = useMemo(() => {
+  // Resolve 3D Target and Pose for the Interactive 3D Viewer
+  const activeTarget3D: ProteinTarget3DConfig = useMemo(() => {
     if (customTarget3D) return customTarget3D;
-    if (step1Selection === 'route_b_her2_trastuzumab') {
+    if (
+      selectedCandidateCard.id === 'her2_trastuzumab_mab' ||
+      intakeState.targetProteinSymbol.toUpperCase().includes('HER2')
+    ) {
       return PROTEIN_TARGETS_3D.HER2;
     }
     return PROTEIN_TARGETS_3D.MRP1;
-  }, [step1Selection, customTarget3D]);
+  }, [customTarget3D, selectedCandidateCard.id, intakeState.targetProteinSymbol]);
 
-  const activePoseModes = useMemo(() => {
-    if (step1Selection === 'route_a_mrp1_failed_hit') {
-      return getModesForSmiles(
-        activeTarget3D,
-        mrp1FailedHit.smiles,
-        mrp1FailedHit.dock_affinity
-      );
-    }
-    if (intakeState.activeViewerLigandMode === 'known_binder') {
-      return getModesForSmiles(
-        activeTarget3D,
-        intakeState.knownBinderSmiles || activeTarget3D.referenceLigandSmiles,
-        intakeState.knownBinderAffinityKcalMol
-      );
-    }
-    if (step1Selection === 'route_b_her2_trastuzumab') {
-      return getModesForSmiles(
-        activeTarget3D,
-        intakeState.candidateSmiles || PROTEIN_TARGETS_3D.HER2.referenceLigandSmiles,
-        intakeState.candidateAffinityKcalMol ||
-          PROTEIN_TARGETS_3D.HER2.referenceAffinityKcalMol
-      );
-    }
-    return getModesForSmiles(
-      activeTarget3D,
-      intakeState.candidateSmiles || mrp1LeadCandidate.smiles,
-      intakeState.candidateAffinityKcalMol || mrp1LeadCandidate.dock_affinity
-    );
-  }, [
-    step1Selection,
-    activeTarget3D,
-    intakeState,
-    mrp1LeadCandidate,
-    mrp1FailedHit,
-  ]);
+  const currentPose = useMemo(() => {
+    const smiles =
+      selectedCandidateCard.id === 'mrp1_r1_c01_rejected'
+        ? 'O=C(N[C@@H](Cc1ccc(O)cc1)C(=O)N[C@@H](CCCN=C(N)N)C(=O)O)[C@H]1O[C@H](CO)[C@@H](O)[C@H](O)[C@H]1c2ccc3nc(S(=O)(=O)c4ccc5ccccc5c4)sc3c2'
+        : intakeState.activeViewerLigandMode === 'known_binder'
+        ? intakeState.knownBinderSmiles
+        : intakeState.candidateSmiles;
+    const affinity =
+      selectedCandidateCard.id === 'mrp1_r1_c01_rejected'
+        ? -12.9
+        : intakeState.activeViewerLigandMode === 'known_binder'
+        ? intakeState.knownBinderAffinityKcalMol
+        : intakeState.candidateAffinityKcalMol;
+    const modes = getModesForSmiles(activeTarget3D, smiles, affinity);
+    return modes[0];
+  }, [selectedCandidateCard.id, intakeState, activeTarget3D]);
 
-  const currentPose =
-    activePoseModes.find((m) => m.mode === selectedPoseMode) || activePoseModes[0];
-
-  // Render Three.js WebGL 3D Molecular Viewer in Step 1
+  // Interactive Three.js 3D Viewer Effect (Runs when on 'discover' or 'evaluate')
   useEffect(() => {
-    if (activeStep !== 1) return;
+    if (activeStage !== 'discover' && activeStage !== 'evaluate') return;
     const container = viewerMountRef.current;
     if (!container) return;
 
@@ -401,8 +495,8 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
     scene.background = new THREE.Color(0x090d16);
 
     const [cx, cy, cz] = activeTarget3D.boxCenter;
-    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 1000);
-    camera.position.set(cx + 17.5, cy + 11.5, cz + 20.5);
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    camera.position.set(cx + 17, cy + 12, cz + 21);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
@@ -416,124 +510,106 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
     controls.dampingFactor = 0.06;
     controls.autoRotate = true;
     controls.autoRotateSpeed = 0.65;
-    controls.update();
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.85));
-    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.15);
-    dirLight1.position.set(cx + 28, cy + 36, cz + 30);
-    scene.add(dirLight1);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    dirLight.position.set(cx + 25, cy + 30, cz + 25);
+    scene.add(dirLight);
 
-    const dirLight2 = new THREE.DirectionalLight(0x38bdf8, 0.55);
-    dirLight2.position.set(cx - 28, cy - 22, cz - 18);
-    scene.add(dirLight2);
-
-    // 1. Target receptor helices
+    // 1. Pocket Helices
     activeTarget3D.helices.forEach((h) => {
-      const startVec = new THREE.Vector3(...h.start);
-      const endVec = new THREE.Vector3(...h.end);
-      const dir = new THREE.Vector3().subVectors(endVec, startVec);
+      const start = new THREE.Vector3(...h.start);
+      const end = new THREE.Vector3(...h.end);
+      const dir = new THREE.Vector3().subVectors(end, start);
       const len = dir.length();
-      const mid = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
-
-      const geom = new THREE.CylinderGeometry(h.radius, h.radius, len, 20);
-      const mat = new THREE.MeshPhysicalMaterial({
-        color: new THREE.Color(h.color),
+      const geom = new THREE.CylinderGeometry(h.radius, h.radius, len, 18);
+      const mat = new THREE.MeshStandardMaterial({
+        color: h.color,
+        roughness: 0.45,
+        metalness: 0.15,
         transparent: true,
-        opacity: 0.48,
-        roughness: 0.3,
-        metalness: 0.1,
+        opacity: 0.55,
       });
-      const cyl = new THREE.Mesh(geom, mat);
-      cyl.position.copy(mid);
-      cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-      scene.add(cyl);
+      const mesh = new THREE.Mesh(geom, mat);
+      mesh.position.copy(start).addScaledVector(dir, 0.5);
+      mesh.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        dir.clone().normalize()
+      );
+      scene.add(mesh);
     });
 
-    // 2. Pocket Surface & Docking Box
+    // 2. Translucent Binding Box
     if (showPocketSurface) {
-      const [sx, sy, sz] = activeTarget3D.boxSize;
-      const boxGeom = new THREE.BoxGeometry(sx, sy, sz);
+      const [bx, by, bz] = activeTarget3D.boxSize;
+      const boxGeom = new THREE.BoxGeometry(bx * 0.72, by * 0.72, bz * 0.72);
       const edges = new THREE.EdgesGeometry(boxGeom);
-      const lineMat = new THREE.LineBasicMaterial({
-        color:
-          step1Selection === 'route_b_her2_trastuzumab'
-            ? 0x38bdf8
-            : step1Selection === 'route_a_mrp1_failed_hit'
-            ? 0xf43f5e
-            : 0x10b981,
-        transparent: true,
-        opacity: 0.4,
-      });
-      const boxLines = new THREE.LineSegments(edges, lineMat);
-      boxLines.position.set(cx, cy, cz);
-      scene.add(boxLines);
-
-      const pocketGeom = new THREE.SphereGeometry(6.8, 24, 24);
-      const pocketMat = new THREE.MeshBasicMaterial({
-        color:
-          step1Selection === 'route_b_her2_trastuzumab'
-            ? 0x38bdf8
-            : step1Selection === 'route_a_mrp1_failed_hit'
-            ? 0xf43f5e
-            : 0x10b981,
-        wireframe: true,
-        transparent: true,
-        opacity: 0.12,
-      });
-      const pocketMesh = new THREE.Mesh(pocketGeom, pocketMat);
-      pocketMesh.position.set(cx, cy, cz);
-      scene.add(pocketMesh);
+      const line = new THREE.LineSegments(
+        edges,
+        new THREE.LineBasicMaterial({
+          color: 0x38bdf8,
+          transparent: true,
+          opacity: 0.35,
+        })
+      );
+      line.position.set(cx, cy, cz);
+      scene.add(line);
     }
 
-    // 3. Binding Pocket Contact Residues
+    // 3. Contact Residues
     if (showContactSticks) {
       activeTarget3D.contactResidues.forEach((res) => {
         res.atoms.forEach((a) => {
-          const sphereGeom = new THREE.SphereGeometry(0.26, 12, 12);
-          const sphereMat = new THREE.MeshStandardMaterial({
-            color: a.element === 'C' ? 0xfacc15 : ELEMENT_COLORS[a.element] || 0x94a3b8,
-            roughness: 0.35,
+          const g = new THREE.SphereGeometry(0.28, 12, 12);
+          const m = new THREE.MeshStandardMaterial({
+            color:
+              a.element === 'O'
+                ? 0xf43f5e
+                : a.element === 'N'
+                ? 0x3b82f6
+                : 0xfacc15,
           });
-          const mesh = new THREE.Mesh(sphereGeom, sphereMat);
-          mesh.position.set(a.x, a.y, a.z);
-          scene.add(mesh);
+          const s = new THREE.Mesh(g, m);
+          s.position.set(a.x, a.y, a.z);
+          scene.add(s);
         });
       });
     }
 
-    // 4. Ligand Atoms & Covalent Bonds
+    // 4. Ligand Atoms & Bonds
     if (currentPose) {
       const atoms = currentPose.ligandAtoms;
-      atoms.forEach((atom) => {
-        const radius = atom.element === 'C' ? 0.38 : 0.44;
-        const geom = new THREE.SphereGeometry(radius, 18, 18);
-        const mat = new THREE.MeshPhysicalMaterial({
-          color: ELEMENT_COLORS[atom.element] || 0x00e5ff,
-          roughness: 0.2,
-          metalness: 0.15,
+      atoms.forEach((a) => {
+        const rad = a.element === 'C' ? 0.38 : 0.42;
+        const g = new THREE.SphereGeometry(rad, 18, 18);
+        const col =
+          selectedCandidateCard.id === 'mrp1_r1_c01_rejected' && a.element === 'C'
+            ? 0xfb7185
+            : ELEMENT_COLORS[a.element] || 0x22d3ee;
+        const m = new THREE.MeshStandardMaterial({
+          color: col,
+          roughness: 0.25,
+          metalness: 0.2,
         });
-        const sphere = new THREE.Mesh(geom, mat);
-        sphere.position.set(atom.x, atom.y, atom.z);
-        scene.add(sphere);
+        const mesh = new THREE.Mesh(g, m);
+        mesh.position.set(a.x, a.y, a.z);
+        scene.add(mesh);
       });
 
       for (let i = 0; i < atoms.length; i++) {
         for (let j = i + 1; j < atoms.length; j++) {
-          const a = atoms[i];
-          const b = atoms[j];
-          const dist = Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-          if (dist > 0.4 && dist < 1.95) {
-            const vA = new THREE.Vector3(a.x, a.y, a.z);
-            const vB = new THREE.Vector3(b.x, b.y, b.z);
-            const dir = new THREE.Vector3().subVectors(vB, vA);
-            const mid = new THREE.Vector3().addVectors(vA, vB).multiplyScalar(0.5);
-            const cylGeom = new THREE.CylinderGeometry(0.12, 0.12, dist, 10);
-            const cylMat = new THREE.MeshStandardMaterial({
+          const p1 = new THREE.Vector3(atoms[i].x, atoms[i].y, atoms[i].z);
+          const p2 = new THREE.Vector3(atoms[j].x, atoms[j].y, atoms[j].z);
+          const d = p1.distanceTo(p2);
+          if (d > 0.4 && d < 1.95) {
+            const dir = new THREE.Vector3().subVectors(p2, p1);
+            const cyl = new THREE.CylinderGeometry(0.11, 0.11, d, 10);
+            const mat = new THREE.MeshStandardMaterial({
               color: 0xe2e8f0,
-              roughness: 0.3,
+              roughness: 0.35,
             });
-            const bond = new THREE.Mesh(cylGeom, cylMat);
-            bond.position.copy(mid);
+            const bond = new THREE.Mesh(cyl, mat);
+            bond.position.copy(p1).addScaledVector(dir, 0.5);
             bond.quaternion.setFromUnitVectors(
               new THREE.Vector3(0, 1, 0),
               dir.clone().normalize()
@@ -569,15 +645,16 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
       renderer.dispose();
     };
   }, [
-    activeStep,
+    activeStage,
     activeTarget3D,
     currentPose,
     showPocketSurface,
     showContactSticks,
-    step1Selection,
+    selectedCandidateCard.id,
     cameraResetTick,
   ]);
 
+  // Bioreactor Physics & Multi-Objective Optimiser State (Used when modality is mammalian_cho_bioreactor)
   const isO2Starved = physicsResult.otrMmolPerLHour < physicsResult.ourMmolPerLHour;
   const isShearViolated =
     physicsResult.estimatedShearStressPa > groundedParams.shearThresholdPa ||
@@ -591,6 +668,58 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
     !isMixingSlow &&
     !isFilterViolated;
 
+  const filterSuggestions = useMemo(
+    () =>
+      suggestFilterHydraulicImprovements(
+        strParams,
+        hfParams,
+        groundedParams,
+        groundedParams.optimalVvd,
+        groundedParams.optimalDoPercent
+      ),
+    [strParams, hfParams, groundedParams]
+  );
+
+  const baseline500LStrParams: StirredTankPhysicsParams = useMemo(
+    () => ({
+      ...DEFAULT_STR_PHYSICS,
+      workingVolumeL: 500,
+      spargerType: 'open_pipe',
+      impellerType: 'marine_axial',
+      impellerCount: 2,
+      stirrerSpeedRpm: 115,
+      spargeRateVvm: 0.04,
+      oxygenEnrichmentFraction: 0.21,
+      targetVcdE6PerMl: 43.5,
+    }),
+    []
+  );
+
+  const baselinePhysics = useMemo(
+    () =>
+      solveMassBalanceAndReactorPhysics(
+        baseline500LStrParams,
+        DEFAULT_HF_PHYSICS,
+        groundedParams,
+        groundedParams.optimalVvd,
+        groundedParams.optimalDoPercent
+      ),
+    [baseline500LStrParams, groundedParams]
+  );
+
+  const activeWeights = DEMO_OBJECTIVE_PRESETS[activePresetId].weights;
+  const unifiedSuite = useMemo(
+    () =>
+      optimiseUnifiedReactorConfiguration(
+        strParams,
+        hfParams,
+        groundedParams,
+        activeWeights,
+        downstreamEcon
+      ),
+    [strParams, hfParams, groundedParams, activeWeights, downstreamEcon]
+  );
+
   const gate2 = safetyGates.find((g) => g.id === 'gate2_reactor');
   const gate4 = safetyGates.find((g) => g.id === 'gate4_protocol');
   const isHumanApproved =
@@ -602,7 +731,7 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
     setLastAppliedConfigId(cfg.id);
   };
 
-  // Animated Bioreactor SVG visual helpers for Step 2
+  // Animated Bioreactor SVG visual helpers
   const rotationDurationSec = Math.max(
     0.35,
     Math.min(3.0, 60 / Math.max(20, strParams.stirrerSpeedRpm))
@@ -613,2708 +742,1488 @@ export const GuidedDemoModePanel: React.FC<GuidedDemoModePanelProps> = ({
       : strParams.impellerCount === 2
       ? [180, 240]
       : [130, 185, 240];
-  const bladeHalfSpanPx = Math.round(28 + (strParams.diameterRatioDiDt - 0.3) * 110);
+  const bladeHalfSpanPx = Math.round(
+    28 + (strParams.diameterRatioDiDt - 0.3) * 110
+  );
+
+  const STAGES: { id: UnifiedFlowStage; num: string; label: string; sub: string }[] = [
+    {
+      id: 'discover',
+      num: '1',
+      label: 'Discover',
+      sub: 'Target, Known Binder & 3D Pocket',
+    },
+    {
+      id: 'evaluate',
+      num: '2',
+      label: 'Evaluate',
+      sub: 'Passed Candidates & Pros/Cons',
+    },
+    {
+      id: 'manufacture',
+      num: '3',
+      label: 'Manufacture',
+      sub:
+        effectiveModality === 'chemical_synthesis'
+          ? 'Chemical Synthesis Feasibility'
+          : effectiveModality === 'mammalian_cho_bioreactor'
+          ? '500 L Animated Bioreactor'
+          : 'Host & Modality Gate',
+    },
+    {
+      id: 'optimise',
+      num: '4',
+      label: 'Optimise',
+      sub:
+        effectiveModality === 'chemical_synthesis'
+          ? '3-Step Route vs Chiral Trap'
+          : 'AI Reactor Interventions & BO',
+    },
+    {
+      id: 'next_experiments',
+      num: '5',
+      label: 'Next Experiments',
+      sub: 'Validation Plan & Human Sign-Off',
+    },
+  ];
+
+  const currentStageIdx = STAGES.findIndex((s) => s.id === activeStage);
 
   return (
     <section
-      aria-label="Guided Demo Mode — 4-Minute Hackathon Pitch Flow"
-      className="space-y-4"
+      aria-label="Unified Discovery-to-Manufacturing Guided Flow"
+      className="space-y-5"
     >
-      {/* Top 4-Step Guided Stepper Bar */}
-      <div className="bg-white border border-slate-300 shadow-xs p-3">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-slate-200">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="px-2 py-0.5 text-[11px] font-mono font-bold uppercase tracking-wider bg-blue-600 text-white">
-              GUIDED DEMO MODE · 4-MINUTE PITCH FLOW
-            </span>
-            <span className="text-xs text-slate-600">
-              Connected to the live <strong>bioREACT</strong> physics, docking, and Bayesian optimisation engine — changes sync immediately with Research Workbench.
-            </span>
+      {/* Clean Top Navigation Header: 5 Unified Stages (Discover → Evaluate → Manufacture → Optimise → Next Experiments) */}
+      <div className="bg-white border border-slate-200 p-5 shadow-xs space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-mono font-bold text-blue-700">
+              <span className="normal-case">bioREACT</span> · UNIFIED DISCOVERY-TO-MANUFACTURING WORKFLOW
+            </div>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-950 mt-0.5">
+              From promising molecules to practical medicines.
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-600 mt-0.5 max-w-3xl">
+              Select a target protein and a passed candidate below. bioREACT automatically
+              determines the appropriate manufacturing modality, checks synthesis or bioreactor
+              feasibility, and recommends what to test next.
+            </p>
           </div>
+
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              disabled={activeStep === 1}
+              disabled={currentStageIdx <= 0}
               onClick={() =>
-                setActiveStep((prev) => Math.max(1, prev - 1) as GuidedDemoStep)
+                setActiveStage(STAGES[Math.max(0, currentStageIdx - 1)].id)
               }
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-mono font-semibold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              Prev Step
+              <span>Previous</span>
             </button>
             <button
               type="button"
-              disabled={activeStep === 4}
+              disabled={currentStageIdx >= STAGES.length - 1}
               onClick={() =>
-                setActiveStep((prev) => Math.min(4, prev + 1) as GuidedDemoStep)
+                setActiveStage(
+                  STAGES[Math.min(STAGES.length - 1, currentStageIdx + 1)].id
+                )
               }
-              className="inline-flex items-center gap-1 px-3 py-1 text-xs font-mono font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 cursor-pointer"
+              className="inline-flex items-center gap-1 px-3.5 py-1.5 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 cursor-pointer"
             >
-              Next Step
+              <span>Next Stage</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-          {/* Step 1 Tab */}
-          <button
-            type="button"
-            onClick={() => setActiveStep(1)}
-            className={`text-left p-2.5 border transition-colors cursor-pointer ${
-              activeStep === 1
-                ? 'border-blue-600 bg-blue-50/70 ring-1 ring-blue-600'
-                : 'border-slate-200 bg-slate-50/70 hover:bg-slate-100'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
-              <span className="font-bold text-blue-800">STEP 1 · 0:00–1:00</span>
-              <span className="px-1.5 py-0.5 bg-slate-200 text-slate-800 font-semibold">
-                {candidatePathwayMode === 'small_molecule_chemical'
-                  ? 'Route A (Small Mol)'
-                  : `Route B (${candidate.genericName})`}
-              </span>
-            </div>
-            <div className="text-xs font-bold text-slate-900 mt-1">
-              1. Choose a Medicine
-            </div>
-            <div className="text-[11px] text-slate-600 truncate">
-              3D Molecular Viewer &amp; Manufacturing Route
-            </div>
-          </button>
-
-          {/* Step 2 Tab */}
-          <button
-            type="button"
-            onClick={() => {
-              if (candidatePathwayMode === 'small_molecule_chemical') {
-                onChangePathwayMode('established_biologic');
-              }
-              setActiveStep(2);
-            }}
-            className={`text-left p-2.5 border transition-colors cursor-pointer ${
-              activeStep === 2
-                ? 'border-blue-600 bg-blue-50/70 ring-1 ring-blue-600'
-                : 'border-slate-200 bg-slate-50/70 hover:bg-slate-100'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
-              <span className="font-bold text-blue-800">STEP 2 · 1:00–2:00</span>
-              <span
-                className={`px-1.5 py-0.5 font-semibold ${
-                  isO2Starved || !isAllPhysicsFeasible
-                    ? 'bg-rose-100 text-rose-900'
-                    : 'bg-emerald-100 text-emerald-900'
+        {/* 5-Stage Segmented Bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2 border-t border-slate-100">
+          {STAGES.map((st) => {
+            const isActive = activeStage === st.id;
+            return (
+              <button
+                key={st.id}
+                type="button"
+                onClick={() => setActiveStage(st.id)}
+                className={`p-3 text-left border transition-colors cursor-pointer ${
+                  isActive
+                    ? 'border-blue-600 bg-blue-50/60'
+                    : 'border-slate-200 bg-slate-50/60 hover:bg-slate-100'
                 }`}
               >
-                {isO2Starved
-                  ? `O₂ Deficit (${physicsResult.otrMmolPerLHour.toFixed(1)} < ${physicsResult.ourMmolPerLHour.toFixed(1)})`
-                  : isAllPhysicsFeasible
-                  ? '500 L Feasible'
-                  : 'Constraint Alert'}
-              </span>
-            </div>
-            <div className="text-xs font-bold text-slate-900 mt-1">
-              2. Discover the Bottleneck
-            </div>
-            <div className="text-[11px] text-slate-600 truncate">
-              Interactive 500 L CHO Bioreactor Cutaway
-            </div>
-          </button>
-
-          {/* Step 3 Tab */}
-          <button
-            type="button"
-            onClick={() => {
-              if (candidatePathwayMode === 'small_molecule_chemical') {
-                onChangePathwayMode('established_biologic');
-              }
-              setActiveStep(3);
-            }}
-            className={`text-left p-2.5 border transition-colors cursor-pointer ${
-              activeStep === 3
-                ? 'border-blue-600 bg-blue-50/70 ring-1 ring-blue-600'
-                : 'border-slate-200 bg-slate-50/70 hover:bg-slate-100'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
-              <span className="font-bold text-blue-800">STEP 3 · 2:00–3:15</span>
-              <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-900 font-semibold">
-                {unifiedSuite.rankedConfigurations.length} Ranked Recipes
-              </span>
-            </div>
-            <div className="text-xs font-bold text-slate-900 mt-1">
-              3. Ask bioREACT What to Test Next
-            </div>
-            <div className="text-[11px] text-slate-600 truncate">
-              Live Multi-Objective Next Experiments
-            </div>
-          </button>
-
-          {/* Step 4 Tab */}
-          <button
-            type="button"
-            onClick={() => setActiveStep(4)}
-            className={`text-left p-2.5 border transition-colors cursor-pointer ${
-              activeStep === 4
-                ? 'border-blue-600 bg-blue-50/70 ring-1 ring-blue-600'
-                : 'border-slate-200 bg-slate-50/70 hover:bg-slate-100'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
-              <span className="font-bold text-blue-800">STEP 4 · 3:15–4:00</span>
-              <span
-                className={`px-1.5 py-0.5 font-semibold ${
-                  isHumanApproved && isAllPhysicsFeasible
-                    ? 'bg-emerald-100 text-emerald-900'
-                    : 'bg-amber-100 text-amber-900'
-                }`}
-              >
-                {isHumanApproved && isAllPhysicsFeasible
-                  ? 'Human Approved'
-                  : 'Sign-Off Required'}
-              </span>
-            </div>
-            <div className="text-xs font-bold text-slate-900 mt-1">
-              4. Review the Decision
-            </div>
-            <div className="text-[11px] text-slate-600 truncate">
-              Before/After, Evidence &amp; Human Gate
-            </div>
-          </button>
+                <div className="flex items-center justify-between text-xs font-bold text-slate-900">
+                  <span>
+                    {st.num}. {st.label}
+                  </span>
+                  {isActive && (
+                    <span className="text-[11px] font-mono text-blue-700">Active</span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-600 truncate mt-0.5">
+                  {st.sub}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
+      {/* PERSISTENT PASSED CANDIDATES SELECTOR BAR (Interactive Candidate Picker Instead of Static Timeline) */}
+      <div className="bg-white border border-slate-200 p-5 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-slate-950">
+              Select a Screened Candidate to Take Forward
+            </h2>
+            <p className="text-xs text-slate-600">
+              Click any candidate below to load its 3D target pocket, automatically classify its
+              manufacturing pathway, and proceed through evaluation and next-experiment planning.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowCustomInputForm((v) => !v)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 cursor-pointer shrink-0"
+          >
+            <Sliders className="w-3.5 h-3.5 text-blue-600" />
+            <span>
+              {showCustomInputForm
+                ? 'Hide Custom Target / PDB / SMILES Input Form'
+                : 'Customise Target Protein, Known Binder or Upload .pdb'}
+            </span>
+            {showCustomInputForm ? (
+              <ChevronUp className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
+          </button>
+        </div>
+
+        {/* Interactive Candidate Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+          {PASSED_CANDIDATE_GALLERY.map((item) => {
+            const isSelected = selectedCandidateCard.id === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => handleSelectGalleryCandidate(item)}
+                className={`p-3 text-left border transition-all cursor-pointer flex flex-col justify-between ${
+                  isSelected
+                    ? 'border-blue-600 bg-blue-50/50 shadow-xs'
+                    : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100'
+                }`}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-1 text-[11px] font-mono">
+                    <span
+                      className={`font-bold ${
+                        item.screeningStatus === 'PASSED'
+                          ? 'text-emerald-700'
+                          : item.screeningStatus === 'PRELIMINARY'
+                          ? 'text-amber-700'
+                          : 'text-rose-700'
+                      }`}
+                    >
+                      {item.screeningStatus === 'PASSED'
+                        ? '✓ PASSED'
+                        : item.screeningStatus === 'PRELIMINARY'
+                        ? '● PRELIMINARY'
+                        : '✕ REJECTED'}
+                    </span>
+                    <span className="text-slate-500 truncate">{item.targetSymbol}</span>
+                  </div>
+                  <div className="text-xs font-bold text-slate-950 leading-snug">
+                    {item.name}
+                  </div>
+                </div>
+                <div className="pt-2 mt-2 border-t border-slate-200/70 text-[11px] text-slate-600 truncate">
+                  {item.modalityLabel}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Collapsible Custom Target, Receptor & Known Binder Input Form */}
+        {showCustomInputForm && (
+          <div className="pt-3 border-t border-slate-200">
+            <InitialDrugTargetIntakePanel
+              intakeState={intakeState}
+              onUpdateIntakeState={setIntakeState}
+              allBiologicCandidates={allBiologicCandidates}
+              onSelectBiologicCandidate={onSelectCandidate}
+              onChangePathwayMode={onChangePathwayMode}
+              onApplyTo3DViewer={(nextIntake, customTarget) => {
+                setIntakeState(nextIntake);
+                if (customTarget) {
+                  setCustomTarget3D(customTarget);
+                }
+                if (nextIntake.pathwayRoute === 'route_b_biologic') {
+                  setSelectedGalleryId('her2_trastuzumab_mab');
+                } else {
+                  setSelectedGalleryId('mrp1_r2_lead_1');
+                }
+                setCameraResetTick((t) => t + 1);
+              }}
+            />
+          </div>
+        )}
+      </div>
+
       {/* =====================================================================
-          STEP 1 — CHOOSE A MEDICINE (INPUT REFERENCE, TARGET, RECEPTOR & KNOWN BINDER)
+          STAGE 1: DISCOVER — TARGET PROTEIN, KNOWN BINDER & 3D POCKET VIEWER
          ===================================================================== */}
-      {activeStep === 1 && (
-        <div className="bg-white border border-slate-300 shadow-xs p-5 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+      {activeStage === 'discover' && (
+        <div className="bg-white border border-slate-200 p-6 shadow-xs space-y-5">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-4">
             <div>
-              <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-blue-700">
-                STEP 1 OF 4 · INITIAL DRUG, TARGET PROTEIN, RECEPTOR &amp; KNOWN BINDER INPUT
+              <div className="text-xs font-mono font-bold uppercase text-blue-700">
+                1. Discover · Target Protein, Starting Molecule &amp; 3D Binding Pocket
               </div>
-              <h1 className="text-lg font-bold text-slate-900">
-                Step 1 — Input Drug via Reference, Target Protein, 3D Receptor &amp; Known Binder
-              </h1>
-              <p className="text-xs text-slate-600 mt-0.5 max-w-3xl">
-                Initialise your candidate by specifying the <strong>Literature Reference</strong>, <strong>Target Protein (UniProt)</strong>, <strong>3D Receptor Structure (PDB / .pdb)</strong>, and <strong>Known Binder</strong>. Inspect the binding pocket in 3D and verify whether the drug requires organic chemical synthesis (Route A) or CHO mammalian bioreactor culture (Route B).
+              <h2 className="text-lg font-bold text-slate-950 mt-0.5">
+                {selectedCandidateCard.name} · Target: {selectedCandidateCard.targetSymbol}
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 mt-0.5 max-w-3xl">
+                {selectedCandidateCard.targetSymbol.includes('MRP1')
+                  ? 'Some cancer cells use proteins such as MRP1 to pump certain drugs out of the cell. Researchers design molecules to fit inside MRP1 and inhibit this transport, potentially helping drugs remain inside cells.'
+                  : selectedCandidateCard.targetRolePlain}
               </p>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => onSwitchToWorkbenchSection('dissertation_3d')}
-                className="px-2.5 py-1.5 text-xs font-mono text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 cursor-pointer"
-              >
-                Open Full 3D Docking Workbench →
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onChangePathwayMode('established_biologic');
-                  setStep1Selection('route_b_her2_trastuzumab');
-                  setIntakeState(INITIAL_DRUG_TARGET_PRESETS.her2_trastuzumab_biologic);
-                  setActiveStep(2);
-                }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-mono font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
-              >
-                Continue to Step 2 (Bioreactor)
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setActiveStage('evaluate')}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer shrink-0"
+            >
+              <span>Proceed to 2. Evaluate Candidate</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
           </div>
 
-          {/* Initial 4-Pillar Drug Input Interface: Reference + Target Protein + Receptor + Known Binder */}
-          <InitialDrugTargetIntakePanel
-            intakeState={intakeState}
-            onUpdateIntakeState={setIntakeState}
-            allBiologicCandidates={allBiologicCandidates}
-            onSelectBiologicCandidate={onSelectCandidate}
-            onChangePathwayMode={onChangePathwayMode}
-            onApplyTo3DViewer={(nextIntake, customTarget) => {
-              if (customTarget) {
-                setCustomTarget3D(customTarget);
-              } else {
-                setCustomTarget3D(null);
-              }
-              if (nextIntake.pathwayRoute === 'route_b_biologic') {
-                setStep1Selection('route_b_her2_trastuzumab');
-              } else {
-                setStep1Selection('route_a_mrp1_lead');
-              }
-              setSelectedPoseMode(1);
-            }}
-          />
-
-          {/* Primary 2-Column Visual & Candidate Profile */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-            {/* Left 7 Cols: Prominent Interactive 3D Molecular Viewer */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+            {/* Left 7 Cols: Interactive 3D Molecular Viewer */}
             <div className="lg:col-span-7 bg-slate-950 border border-slate-800 text-slate-100 flex flex-col justify-between">
-              <div className="p-3 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-1.5">
+              <div className="px-4 py-2.5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                <div className="flex items-center gap-2">
+                  <span className="text-cyan-400 font-semibold">
+                    Interactive 3D Pocket ({activeTarget3D.symbol} · PDB {activeTarget3D.pdbId})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => {
-                      setStep1Selection('route_a_mrp1_lead');
-                      setIntakeState({
-                        ...INITIAL_DRUG_TARGET_PRESETS.mrp1_mk571_small_molecule,
-                        activeViewerLigandMode: 'designed_candidate',
-                      });
-                      setCustomTarget3D(null);
-                      onChangePathwayMode('small_molecule_chemical');
-                      setSelectedPoseMode(1);
-                    }}
-                    className={`px-2.5 py-1 text-[11px] font-mono border cursor-pointer transition-colors ${
-                      step1Selection === 'route_a_mrp1_lead' &&
-                      intakeState.activeViewerLigandMode === 'designed_candidate'
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400 font-bold'
-                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
-                    }`}
-                  >
-                    Route A · MRP1 Lead (−10.82 kcal/mol · PASS)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStep1Selection('route_a_mrp1_lead');
+                    onClick={() =>
                       setIntakeState({
                         ...intakeState,
                         activeViewerLigandMode: 'known_binder',
-                      });
-                      setSelectedPoseMode(1);
-                    }}
-                    className={`px-2.5 py-1 text-[11px] font-mono border cursor-pointer transition-colors ${
-                      intakeState.activeViewerLigandMode === 'known_binder' &&
-                      step1Selection !== 'route_b_her2_trastuzumab'
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-400 font-bold'
-                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                      })
+                    }
+                    className={`px-2 py-1 text-[11px] border cursor-pointer ${
+                      intakeState.activeViewerLigandMode === 'known_binder'
+                        ? 'bg-amber-600 text-white border-amber-500 font-semibold'
+                        : 'bg-slate-900 text-slate-300 border-slate-700'
                     }`}
                   >
-                    Known Binder ({intakeState.knownBinderName.split(' ')[0]} ·{' '}
-                    {intakeState.knownBinderAffinityKcalMol.toFixed(1)} kcal/mol)
+                    Known Binder ({intakeState.knownBinderName.split('(')[0].trim()})
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setStep1Selection('route_a_mrp1_failed_hit');
-                      onChangePathwayMode('small_molecule_chemical');
-                      setSelectedPoseMode(1);
-                    }}
-                    className={`px-2.5 py-1 text-[11px] font-mono border cursor-pointer transition-colors ${
-                      step1Selection === 'route_a_mrp1_failed_hit'
-                        ? 'bg-rose-500/20 text-rose-300 border-rose-400 font-bold'
-                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                    onClick={() =>
+                      setIntakeState({
+                        ...intakeState,
+                        activeViewerLigandMode: 'designed_candidate',
+                      })
+                    }
+                    className={`px-2 py-1 text-[11px] border cursor-pointer ${
+                      intakeState.activeViewerLigandMode === 'designed_candidate'
+                        ? 'bg-emerald-600 text-white border-emerald-500 font-semibold'
+                        : 'bg-slate-900 text-slate-300 border-slate-700'
                     }`}
                   >
-                    Route A · Raw Hit (−11.40 kcal/mol · FAIL Critic)
+                    Selected Candidate
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setStep1Selection('route_b_her2_trastuzumab');
-                      setIntakeState(
-                        INITIAL_DRUG_TARGET_PRESETS.her2_trastuzumab_biologic
-                      );
-                      setCustomTarget3D(null);
-                      onChangePathwayMode('established_biologic');
-                      onSelectCandidate('trastuzumab');
-                      setSelectedPoseMode(1);
-                    }}
-                    className={`px-2.5 py-1 text-[11px] font-mono border cursor-pointer transition-colors ${
-                      step1Selection === 'route_b_her2_trastuzumab'
-                        ? 'bg-sky-500/20 text-sky-300 border-sky-400 font-bold'
-                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
-                    }`}
+                    onClick={() => setShowPocketSurface((v) => !v)}
+                    className="px-2 py-1 text-[11px] bg-slate-900 text-slate-300 border border-slate-700 cursor-pointer"
                   >
-                    Route B · HER2 Target ({candidate.genericName} Biologic)
+                    Box: {showPocketSurface ? 'ON' : 'OFF'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCameraResetTick((t) => t + 1)}
+                    className="px-2 py-1 text-[11px] bg-slate-900 text-slate-300 border border-slate-700 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3 h-3 inline" />
                   </button>
                 </div>
-
-                <span className="text-[10px] font-mono text-slate-400">
-                  Interactive Three.js / WebGL 3D Viewer
-                </span>
               </div>
 
-              {/* 3D Canvas Container */}
-              <div className="relative w-full h-[340px] bg-[#090d16]">
-                <div ref={viewerMountRef} className="w-full h-full" />
-
-                {/* Top-Left Target, Receptor, Reference & Known Binder Overlay */}
-                <div className="absolute top-2.5 left-2.5 bg-slate-950/90 border border-slate-800 px-2.5 py-1.5 text-[11px] font-mono space-y-0.5 pointer-events-none max-w-[92%]">
-                  <div className="text-sky-300 font-bold truncate">
-                    Target: {intakeState.targetProteinSymbol} (UniProt {intakeState.targetUniprotId}) · Receptor PDB: {intakeState.receptorPdbId}
-                  </div>
-                  <div className="text-amber-300 truncate">
-                    Known Binder: {intakeState.knownBinderName} ({intakeState.knownBinderKdOrPotency})
-                  </div>
-                  <div className="text-slate-300 truncate">
-                    {step1Selection === 'route_b_her2_trastuzumab'
-                      ? `Biologic Drug: ${candidate.genericName} (${candidate.brandName}) · 145.5 kDa IgG1 mAb`
-                      : step1Selection === 'route_a_mrp1_failed_hit'
-                      ? `3D Pose: R1-Glycoside-Hit · Vina ${currentPose?.affinityKcalMol.toFixed(2)} kcal/mol (7 Stereocentres — Rejected)`
-                      : intakeState.activeViewerLigandMode === 'known_binder'
-                      ? `3D Pose: Known Binder (${intakeState.knownBinderName}) · Vina ${currentPose?.affinityKcalMol.toFixed(2)} kcal/mol`
-                      : `3D Pose: ${intakeState.candidateName} · Vina ${currentPose?.affinityKcalMol.toFixed(2)} kcal/mol`}
-                  </div>
-                  <div className="text-[10px] text-slate-400 truncate">
-                    Ref: {intakeState.referenceCitation} ({intakeState.referenceAccessionId})
-                  </div>
-                </div>
-
-                {/* Bottom Controls Bar */}
-                <div className="absolute bottom-2.5 left-2.5 right-2.5 flex flex-wrap items-center justify-between gap-2 bg-slate-950/90 border border-slate-800 px-2.5 py-1.5 text-[11px] font-mono">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-slate-400">Vina Mode:</span>
-                    {[1, 2, 3, 4, 5].map((mNum) => (
-                      <button
-                        key={mNum}
-                        type="button"
-                        onClick={() => setSelectedPoseMode(mNum)}
-                        className={`px-1.5 py-0.5 border cursor-pointer ${
-                          selectedPoseMode === mNum
-                            ? 'bg-sky-600 text-white border-sky-400 font-bold'
-                            : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
-                        }`}
-                      >
-                        #{mNum}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowPocketSurface((v) => !v)}
-                      className={`px-2 py-0.5 border cursor-pointer ${
-                        showPocketSurface
-                          ? 'border-emerald-500/60 text-emerald-300 bg-emerald-950/40'
-                          : 'border-slate-700 text-slate-400'
-                      }`}
-                    >
-                      Pocket Box
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowContactSticks((v) => !v)}
-                      className={`px-2 py-0.5 border cursor-pointer ${
-                        showContactSticks
-                          ? 'border-amber-500/60 text-amber-300 bg-amber-950/40'
-                          : 'border-slate-700 text-slate-400'
-                      }`}
-                    >
-                      Residues
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCameraResetTick((t) => t + 1)}
-                      className="px-2 py-0.5 border border-slate-700 text-slate-300 hover:bg-slate-800 cursor-pointer"
-                    >
-                      Reset View
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Right 5 Cols: Concise Candidate Profile & Pathway Distinction */}
-            <div className="lg:col-span-5 flex flex-col justify-between bg-slate-50 border border-slate-200 p-4 space-y-3">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-mono font-bold uppercase px-2 py-0.5 bg-slate-900 text-white">
-                    {step1Selection === 'route_b_her2_trastuzumab'
-                      ? 'ROUTE B · RECOMBINANT BIOLOGIC (CHO BIOREACTOR)'
-                      : 'ROUTE A · SMALL MOLECULE (CHEMICAL SYNTHESIS)'}
+              <div className="relative w-full h-[350px] bg-[#090d16]">
+                <div ref={viewerMountRef} className="w-full h-full cursor-grab" />
+                <div className="absolute bottom-3 left-3 right-3 bg-slate-950/85 border border-slate-800 px-3 py-2 text-[11px] font-mono text-slate-300 flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    Showing:{' '}
+                    <strong className="text-white">
+                      {intakeState.activeViewerLigandMode === 'known_binder'
+                        ? intakeState.knownBinderName
+                        : selectedCandidateCard.name}
+                    </strong>
                   </span>
-                  {step1Selection === 'route_b_her2_trastuzumab' && (
-                    <div className="flex items-center gap-1">
-                      {allBiologicCandidates.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => {
-                            onChangePathwayMode('established_biologic');
-                            onSelectCandidate(c.id);
-                          }}
-                          className={`px-2 py-0.5 text-[10px] font-mono border cursor-pointer ${
-                            candidate.id === c.id
-                              ? 'bg-blue-600 text-white border-blue-600 font-bold'
-                              : 'bg-white text-slate-700 border-slate-300'
-                          }`}
-                        >
-                          {c.genericName}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  <span className="text-amber-300">
+                    Contacts:{' '}
+                    {activeTarget3D.contactResidues
+                      .map((r) => `${r.resName}-${r.resSeq}`)
+                      .join(', ')}
+                  </span>
                 </div>
-
-                {step1Selection === 'route_b_her2_trastuzumab' ? (
-                  <div className="bg-white border border-slate-200 p-3.5 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h2 className="text-sm font-bold text-slate-900">
-                          {candidate.genericName} ({candidate.brandName})
-                        </h2>
-                        <p className="text-xs text-slate-600">
-                          {candidate.modality} · 145.5 kDa Glycosylated Protein · Target:{' '}
-                          <span className="font-mono font-semibold text-slate-800">
-                            {candidate.targetAntigen} (UniProt {candidate.targetUniprotId.slice(0, 6)})
-                          </span>
-                        </p>
-                      </div>
-                      <span className="px-2 py-0.5 text-[11px] font-mono font-bold bg-blue-100 text-blue-900 border border-blue-300">
-                        CHO Bioreactor Route
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-700 leading-relaxed">
-                      <strong>Why a Bioreactor is Required:</strong> Full-length IgG1 antibodies cannot be made by organic chemistry. Living <strong>CHO-K1 mammalian cells</strong> must fold the heavy/light chains and attach N-glycans in a temperature-, pH-, and oxygen-controlled stirred-tank bioreactor.
-                    </p>
-                    <div className="grid grid-cols-3 gap-2 pt-1 text-[11px] font-mono">
-                      <div className="bg-slate-50 border border-slate-200 p-2">
-                        <div className="text-slate-500">Specific Output q_p</div>
-                        <div className="font-bold text-slate-900">
-                          {groundedParams.qpBase} pg/cell/d
-                        </div>
-                      </div>
-                      <div className="bg-slate-50 border border-slate-200 p-2">
-                        <div className="text-slate-500">O₂ Demand q_O2</div>
-                        <div className="font-bold text-slate-900">
-                          {groundedParams.qO2Specific} pmol/cell/h
-                        </div>
-                      </div>
-                      <div className="bg-slate-50 border border-slate-200 p-2">
-                        <div className="text-slate-500">Shear Limit τ_crit</div>
-                        <div className="font-bold text-slate-900">
-                          ≤ {groundedParams.shearThresholdPa} Pa
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-white border border-slate-200 p-3.5 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h2 className="text-sm font-bold text-slate-900">
-                          {step1Selection === 'route_a_mrp1_lead'
-                            ? 'R2-Lead-1 (Achiral Biaryl Sulfonamide)'
-                            : 'R1-Raw-Hit-1 (Polyphenolic C-Glycoside)'}
-                        </h2>
-                        <p className="text-xs text-slate-600">
-                          Small-Molecule Inhibitor · 412 Da · Target:{' '}
-                          <span className="font-mono font-semibold text-slate-800">
-                            MRP1 / ABCC1 (UniProt P33527)
-                          </span>
-                        </p>
-                      </div>
-                      <span
-                        className={`px-2 py-0.5 text-[11px] font-mono font-bold border ${
-                          step1Selection === 'route_a_mrp1_lead'
-                            ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                            : 'bg-rose-100 text-rose-900 border-rose-300'
-                        }`}
-                      >
-                        {step1Selection === 'route_a_mrp1_lead'
-                          ? 'PASS Critics (3 Steps)'
-                          : 'FAIL Critics (7 Stereo)'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-700 leading-relaxed">
-                      {step1Selection === 'route_a_mrp1_lead' ? (
-                        <>
-                          <strong>Why Chemical Synthesis is Used:</strong> Although the raw docking winner had a slightly stronger score (−11.40 kcal/mol), it had 7 chiral centres and failed synthesis critics. <strong>bioREACT</strong>&apos;s closed-loop critic selected <strong>R2-Lead-1 (−10.82 kcal/mol)</strong>, which is achiral and buildable in <strong>3 chemical steps</strong> (Suzuki coupling + sulfonamide cap) — no cell bioreactor needed.
-                        </>
-                      ) : (
-                        <>
-                          <strong>Why Docking Score Alone Fails:</strong> This raw docking hit scores −11.40 kcal/mol in MRP1, but our Synthesisability Critic flags <strong>7 chiral centres and &gt;9 steps</strong>. <strong>bioREACT</strong> rejects it in Round 1 and guides the generator toward buildable achiral leads.
-                        </>
-                      )}
-                    </p>
-                  </div>
-                )}
-
-                {/* Scientific Separation Guardrail */}
-                <div className="p-3 bg-amber-50 border border-amber-300 text-xs text-amber-950 space-y-1">
-                  <div className="font-mono font-bold text-[11px] uppercase flex items-center gap-1.5">
-                    <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0" />
-                    Manufacturing Route Separation Guardrail
-                  </div>
-                  <p className="text-[11px] leading-relaxed">
-                    Small-molecule docking scores (−10.82 kcal/mol on <strong>MRP1</strong>) evaluate ligand binding and organic synthesis feasibility (Route A). They <strong>do not predict biologic CHO bioreactor performance</strong> and are never combined with <strong>HER2</strong> antibody manufacturing (Route B).
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                {step1Selection !== 'route_b_her2_trastuzumab' ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStep1Selection('route_b_her2_trastuzumab');
-                      onChangePathwayMode('established_biologic');
-                      onSelectCandidate('trastuzumab');
-                    }}
-                    className="w-full py-2 px-3 text-xs font-mono font-bold bg-slate-900 text-white hover:bg-blue-700 cursor-pointer text-center"
-                  >
-                    Switch to Route B ({candidate.genericName} Biologic) for Bioreactor Scale-Up →
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setActiveStep(2)}
-                    className="w-full py-2 px-3 text-xs font-mono font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    <span>Proceed to Step 2: Inspect 500 L CHO Bioreactor Bottleneck</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                )}
               </div>
             </div>
-          </div>
 
-          {/* Expandable Scientific Details */}
-          <div className="border border-slate-200 bg-slate-50">
-            <button
-              type="button"
-              onClick={() => setShowStep1Details((v) => !v)}
-              className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-mono font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
-            >
-              <span className="flex items-center gap-2">
-                <BookOpen className="w-3.5 h-3.5 text-blue-600" />
-                Scientific Details — Docking Critics, Target Provenance &amp; Route Gate Rules
-              </span>
-              {showStep1Details ? (
-                <ChevronUp className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
-            {showStep1Details && (
-              <div className="p-4 border-t border-slate-200 bg-white grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-700">
-                <div>
-                  <div className="font-mono font-bold text-slate-900 mb-1">
-                    1. 3D Viewer &amp; AutoDock Vina Poses
+            {/* Right 5 Cols: Plain-English Summary & Automatic Manufacturing Modality Classification */}
+            <div className="lg:col-span-5 flex flex-col justify-between bg-slate-50 border border-slate-200 p-5 space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-mono font-bold text-slate-700 uppercase">
+                    Candidate Profile &amp; Modality Check
+                  </span>
+                  <span
+                    className={`font-mono font-bold ${
+                      selectedCandidateCard.screeningStatus === 'PASSED'
+                        ? 'text-emerald-700'
+                        : selectedCandidateCard.screeningStatus === 'PRELIMINARY'
+                        ? 'text-amber-700'
+                        : 'text-rose-700'
+                    }`}
+                  >
+                    {selectedCandidateCard.screeningStatus}
+                  </span>
+                </div>
+
+                <div className="p-3.5 bg-white border border-slate-200 space-y-1.5 text-xs">
+                  <div className="font-bold text-slate-900">
+                    Predicted Binding &amp; Molecular Properties
                   </div>
-                  <p>
-                    Rendered in real time via <strong>Three.js / WebGL</strong> (not static screenshots or external desktop PyMOL). Coordinates use genuine 9-mode Vina docking trajectories inside MRP1 (boxCenter: [114.2, 128.5, 96.4] Å) and structural kinase/ectodomain context for HER2 (UniProt P04626).
+                  <p className="text-slate-700">{selectedCandidateCard.bindingSummary}</p>
+                  <p className="text-slate-600 font-mono text-[11px]">
+                    {selectedCandidateCard.molecularSummary}
                   </p>
                 </div>
-                <div>
-                  <div className="font-mono font-bold text-slate-900 mb-1">
-                    2. Synthesisability &amp; Process Critics (Route A)
+
+                {/* Crucial Scientific Distinction Box */}
+                <div className="p-3.5 bg-amber-50/90 border border-amber-200 text-xs text-amber-950 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0" />
+                    <span>Predicted Binding ≠ Proven Biological Activity</span>
                   </div>
-                  <p>
-                    Evaluates SA Score (≤ 3.5 pass), chiral centres (≤ 2 pass), estimated longest linear sequence (≤ 6 steps), and process-chemistry hazards (bridged epoxides, acyl halides). Closed-loop gating lifts joint pass rate from 12.5% to 87.5%.
+                  <p className="leading-relaxed">
+                    A molecule fitting into the 3D pocket does <strong>not</strong> prove it blocks
+                    transporter activity or keeps drugs inside cells. Functional inhibition must be
+                    validated in cellular assays.
                   </p>
                 </div>
-                <div>
-                  <div className="font-mono font-bold text-slate-900 mb-1">
-                    3. Biologic CQA &amp; CHO Grounding (Route B)
+
+                {/* Automatic Manufacturing Modality Classifier */}
+                <div className="p-3.5 bg-white border border-slate-200 space-y-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-slate-900">
+                      Auto-Classified Manufacturing Pathway:
+                    </span>
+                    <span className="font-mono text-[11px] text-blue-700 font-semibold">
+                      {selectedCandidateCard.supportStatus}
+                    </span>
                   </div>
-                  <p>
-                    Grounded from {prismaIncludedCount} PRISMA-screened records: {candidate.genericName} ({candidate.drugbankOrMabId}) requires afucosylation/galactosylation control, q_p = {groundedParams.qpBase} pg/cell/day, q_O2 = {groundedParams.qO2Specific} pmol/cell/h, and τ_crit = {groundedParams.shearThresholdPa} Pa.
+                  <div className="text-sm font-bold text-blue-900">
+                    {selectedCandidateCard.modalityLabel}
+                  </div>
+                  <p className="text-slate-600 leading-relaxed">
+                    {selectedCandidateCard.autoClassificationReasoning}
                   </p>
                 </div>
               </div>
-            )}
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSwitchToWorkbenchSection('dissertation_3d')}
+                  className="text-xs font-medium text-blue-700 hover:underline cursor-pointer"
+                >
+                  Open Full 3D Docking Sandbox →
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveStage('evaluate')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-slate-900 text-white hover:bg-blue-700 cursor-pointer"
+                >
+                  <span>Compare Candidates (2. Evaluate)</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* =====================================================================
-          STEP 2 — DISCOVER THE MANUFACTURING BOTTLENECK
+          STAGE 2: EVALUATE — COMPARE CANDIDATES, PROS VS CONS, COST & TIME
          ===================================================================== */}
-      {activeStep === 2 && (
-        <div className="bg-white border border-slate-300 shadow-xs p-5 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+      {activeStage === 'evaluate' && (
+        <div className="bg-white border border-slate-200 p-6 shadow-xs space-y-5">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-4">
             <div>
-              <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-blue-700">
-                STEP 2 OF 4 · 500 L BIOREACTOR ENGINEERING FEASIBILITY
+              <div className="text-xs font-mono font-bold uppercase text-blue-700">
+                2. Evaluate · Binding Score vs. Synthesis Feasibility, Cost &amp; Time
               </div>
-              <h1 className="text-lg font-bold text-slate-900">
-                Step 2 — Discover the Manufacturing Bottleneck
-              </h1>
-              <p className="text-xs text-slate-600 mt-0.5 max-w-3xl">
-                Scaling {candidate.genericName} CHO perfusion culture to a 500 L stirred-tank bioreactor reveals a critical physical bottleneck when operated with standard open-pipe air sparging.
+              <h2 className="text-lg font-bold text-slate-950 mt-0.5">
+                Why the Strongest Docking Score Is Not Always the Best Medicine
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 mt-0.5 max-w-3xl">
+                Compare candidates side by side. Click any candidate row to select it and proceed to
+                its specific manufacturing feasibility model.
               </p>
             </div>
+            <button
+              type="button"
+              onClick={() => setActiveStage('manufacture')}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer shrink-0"
+            >
+              <span>Proceed to 3. Manufacture ({selectedCandidateCard.modalityLabel})</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Selected Candidate Highlight Card */}
+          <div className="p-4 bg-slate-50 border border-slate-200 grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+            <div>
+              <div className="text-slate-500 font-medium">Currently Selected Candidate</div>
+              <div className="text-sm font-bold text-slate-950 mt-0.5">
+                {selectedCandidateCard.name}
+              </div>
+              <div className="text-[11px] font-mono text-slate-600 mt-0.5">
+                Target: {selectedCandidateCard.targetSymbol}
+              </div>
+            </div>
+            <div>
+              <div className="text-slate-500 font-medium">Predicted Binding &amp; Complexity</div>
+              <div className="font-semibold text-slate-900 mt-0.5">
+                {selectedCandidateCard.bindingSummary}
+              </div>
+              <div className="text-[11px] text-slate-600 mt-0.5">
+                {selectedCandidateCard.estimatedStepsOrProcess}
+              </div>
+            </div>
+            <div>
+              <div className="text-slate-500 font-medium">Heuristic Cost &amp; Time</div>
+              <div className="font-mono font-semibold text-slate-900 mt-0.5">
+                {selectedCandidateCard.estimatedCostAndTime}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Order-of-magnitude estimate (not a vendor quote)
+              </div>
+            </div>
+            <div>
+              <div className="text-slate-500 font-medium">Main Advantage vs. Risk</div>
+              <div className="text-emerald-800 mt-0.5">
+                <strong>Pro:</strong> {selectedCandidateCard.prosSummary}
+              </div>
+              <div className="text-amber-900 mt-0.5">
+                <strong>Gap:</strong> {selectedCandidateCard.missingEvidence}
+              </div>
+            </div>
+          </div>
+
+          {/* Clean Candidate Comparison Table */}
+          <div className="overflow-x-auto border border-slate-200">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-100 border-b border-slate-200 text-slate-800 font-semibold">
+                  <th className="p-3">Candidate</th>
+                  <th className="p-3">Predicted Binding (with Caveats)</th>
+                  <th className="p-3">Auto-Classified Manufacturing Route</th>
+                  <th className="p-3">Steps / Process Complexity</th>
+                  <th className="p-3">Est. Cost &amp; Time (Heuristic)</th>
+                  <th className="p-3">Pros vs. Cons</th>
+                  <th className="p-3">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 align-top">
+                {PASSED_CANDIDATE_GALLERY.map((c) => {
+                  const isCurrent = c.id === selectedCandidateCard.id;
+                  return (
+                    <tr
+                      key={c.id}
+                      onClick={() => handleSelectGalleryCandidate(c)}
+                      className={`cursor-pointer transition-colors ${
+                        isCurrent ? 'bg-blue-50/50' : 'hover:bg-slate-50'
+                      }`}
+                    >
+                      <td className="p-3">
+                        <div className="font-bold text-slate-950">{c.name}</div>
+                        <div className="text-[11px] font-mono text-slate-500 mt-0.5">
+                          Target: {c.targetSymbol} · {c.screeningStatus}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="font-semibold text-slate-900">{c.bindingSummary}</div>
+                      </td>
+                      <td className="p-3">
+                        <div className="font-semibold text-slate-900">{c.modalityLabel}</div>
+                        <div className="text-[11px] text-slate-500">{c.supportStatus}</div>
+                      </td>
+                      <td className="p-3 font-mono text-[11px] text-slate-800">
+                        {c.estimatedStepsOrProcess}
+                      </td>
+                      <td className="p-3 font-mono text-[11px] text-slate-800">
+                        {c.estimatedCostAndTime}
+                      </td>
+                      <td className="p-3 space-y-1">
+                        <div className="text-emerald-800">
+                          <strong>Pro:</strong> {c.prosSummary}
+                        </div>
+                        <div className="text-rose-800">
+                          <strong>Risk:</strong> {c.consAndRisks}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectGalleryCandidate(c);
+                            setActiveStage('manufacture');
+                          }}
+                          className={`px-2.5 py-1.5 text-xs font-semibold cursor-pointer whitespace-nowrap ${
+                            isCurrent
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-900 text-white hover:bg-blue-600'
+                          }`}
+                        >
+                          Inspect Manufacturing →
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          STAGE 3: MANUFACTURE — AUTO-CLASSIFIED PATHWAY & APPROPRIATE SIMULATOR
+         ===================================================================== */}
+      {activeStage === 'manufacture' && (
+        <div className="bg-white border border-slate-200 p-6 shadow-xs space-y-5">
+          {/* Top Pathway Classification & Researcher Review Bar */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+            <div>
+              <div className="text-xs font-mono font-bold uppercase text-blue-700">
+                3. Manufacture · Automatic Modality Classification &amp; Feasibility Check
+              </div>
+              <h2 className="text-lg font-bold text-slate-950 mt-0.5">
+                {selectedCandidateCard.name} → {selectedCandidateCard.modalityLabel}
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 mt-0.5 max-w-3xl">
+                {selectedCandidateCard.autoClassificationReasoning}
+              </p>
+            </div>
+
             <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <label className="text-xs font-medium text-slate-700">
+                Researcher Modality Review / Override:
+              </label>
+              <select
+                aria-label="Researcher Modality Override"
+                value={effectiveModality}
+                onChange={(e) =>
+                  setResearcherModalityOverride(e.target.value as ClassifiedModalityId)
+                }
+                className="px-2.5 py-1.5 text-xs font-medium bg-slate-50 border border-slate-300 text-slate-900"
+              >
+                <option value="chemical_synthesis">
+                  Small-Molecule Chemical Synthesis (Supported)
+                </option>
+                <option value="mammalian_cho_bioreactor">
+                  Mammalian Cell Culture — 500 L CHO Bioreactor (Supported)
+                </option>
+                <option value="microbial_fermentation">
+                  Microbial Fermentation — E. coli / Pichia (Screening Only)
+                </option>
+                <option value="insufficient_evidence_abstain">
+                  Other / Insufficient Evidence (Abstain)
+                </option>
+              </select>
               <button
                 type="button"
-                onClick={() => {
-                  onTriggerOxygenDeficitDemo();
-                  onUpdateHfParams(DEFAULT_HF_PHYSICS);
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-semibold border border-rose-300 bg-rose-50 text-rose-900 hover:bg-rose-100 cursor-pointer"
+                onClick={() => setActiveStage('optimise')}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Reset to Initial 500 L O₂ Deficit
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveStep(3)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-mono font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
-              >
-                Ask bioREACT What to Test Next (Step 3)
+                <span>Proceed to 4. Optimise</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
 
-          {/* Plain-English Bottleneck Headline Banner */}
-          <div
-            className={`p-4 border-l-4 flex flex-col md:flex-row md:items-center justify-between gap-3 ${
-              isO2Starved
-                ? 'bg-rose-50 border-rose-600 text-rose-950'
-                : !isAllPhysicsFeasible
-                ? 'bg-amber-50 border-amber-600 text-amber-950'
-                : 'bg-emerald-50 border-emerald-600 text-emerald-950'
-            }`}
-          >
-            <div className="space-y-1">
-              <div className="text-base font-bold flex items-center gap-2">
-                {isO2Starved ? (
-                  <>
-                    <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
-                    <span>
-                      “The cells need more oxygen than the reactor can currently deliver.”
-                    </span>
-                  </>
-                ) : isShearViolated || isMixingSlow ? (
-                  <>
-                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-                    <span>
-                      “Oxygen supply is met, but vessel impeller shear or bulk mixing time exceeds safe limits.”
-                    </span>
-                  </>
-                ) : isFilterViolated ? (
-                  <>
-                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-                    <span>
-                      “Bioreactor O₂, impeller shear &amp; mixing pass — but the external Hollow-Fibre Cell-Retention Filter exceeds its laminar wall-shear / hydraulic limit.”
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                    <span>
-                      “All 500 L bioreactor and external cell-retention filter constraints pass!”
-                    </span>
-                  </>
-                )}
-              </div>
-              <p className="text-xs leading-relaxed">
-                {isO2Starved ? (
-                  <>
-                    At <strong>{strParams.workingVolumeL} L</strong> with{' '}
-                    <strong>
-                      {strParams.spargerType === 'open_pipe'
-                        ? 'open-pipe sparging'
-                        : '15 μm sintered microsparger'}
-                    </strong>{' '}
-                    and <strong>{(strParams.oxygenEnrichmentFraction * 100).toFixed(0)}% inlet O₂</strong>, the{' '}
-                    <strong>{strParams.targetVcdE6PerMl.toFixed(1)}×10⁶ cells/mL</strong> consume{' '}
-                    <strong className="underline">
-                      OUR = {physicsResult.ourMmolPerLHour.toFixed(1)} mmol O₂/L/h
-                    </strong>
-                    , but the reactor only transfers{' '}
-                    <strong className="underline">
-                      OTR = {physicsResult.otrMmolPerLHour.toFixed(1)} mmol O₂/L/h
-                    </strong>{' '}
-                    (shortfall of{' '}
-                    <strong>
-                      {Math.abs(physicsResult.oxygenMarginMmolPerLHour).toFixed(1)} mmol/L/h
-                    </strong>
-                    ). Simply spinning the impeller faster damages fragile CHO cells via hydrodynamic shear.
-                  </>
-                ) : isFilterViolated && !isShearViolated && !isMixingSlow ? (
-                  <>
-                    <strong>Why bioreactor RPM / O₂ controls didn&apos;t change the filter bar:</strong>{' '}
-                    Vessel oxygen supply (<strong>OTR {physicsResult.otrMmolPerLHour.toFixed(1)} ≥ OUR {physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h</strong>), vessel impeller shear (<strong>{physicsResult.estimatedShearStressPa.toFixed(2)} ≤ {groundedParams.shearThresholdPa} Pa</strong>), and bulk mixing (<strong>{physicsResult.mixingTimeGassedS.toFixed(1)} ≤ 60 s</strong>) all <strong>PASS</strong>. However, the external{' '}
-                    <strong>{(hfParams.retentionMode ?? 'atf_alternating') === 'atf_alternating' ? 'ATF' : 'TFF'} hollow-fibre filtration loop</strong> is a separate hydraulic circuit: while filter pressure drop passes (<strong>ΔP = {physicsResult.hfPressureDropKpa.toFixed(1)} / {physicsResult.hfPressureDropLimitKpa.toFixed(1)} kPa</strong>, {physicsResult.hfPressureDropLoadPct.toFixed(0)}%),{' '}
-                    <strong>{physicsResult.hfFailingSubConstraints.join(' ')}</strong>{' '}
-                    Use the <strong>Cell-Retention Filter Settings</strong> panel below or click <strong>Suggest Filter Improvements</strong> to adjust fibre inner diameter (<code>d_f</code>), recirculation flow (<code>Q_HF</code>), or parallel cartridges.
-                  </>
-                ) : (
-                  <>
-                    Live 500 L model delivers{' '}
-                    <strong>OTR = {physicsResult.otrMmolPerLHour.toFixed(1)} mmol O₂/L/h</strong> vs{' '}
-                    <strong>OUR = {physicsResult.ourMmolPerLHour.toFixed(1)} mmol O₂/L/h</strong> (margin{' '}
-                    <strong>+{physicsResult.oxygenMarginMmolPerLHour.toFixed(1)} mmol/L/h</strong>), bulk mixing time{' '}
-                    <strong>{physicsResult.mixingTimeGassedS.toFixed(1)} s</strong> (≤ 60 s), turbulent impeller shear{' '}
-                    <strong>{physicsResult.estimatedShearStressPa.toFixed(2)} Pa</strong> (≤{' '}
-                    {groundedParams.shearThresholdPa} Pa), filter ΔP{' '}
-                    <strong>{physicsResult.hfPressureDropKpa.toFixed(1)} kPa</strong> (≤ {physicsResult.hfPressureDropLimitKpa.toFixed(0)} kPa), and laminar filter wall shear{' '}
-                    <strong>{physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} Pa</strong> (≤ {physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa).
-                  </>
-                )}
-              </p>
-            </div>
-          </div>
-
-          {/* Primary 2-Column Visual & Interactive Controls */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-            {/* Left 7 Cols: Interactive Animated Bioreactor + Hollow-Fibre Cutaway */}
-            <div className="lg:col-span-7 bg-slate-950 border border-slate-800 text-slate-100 p-4 flex flex-col justify-between">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+          {/* Warning if researcher overrides a small molecule into a CHO bioreactor */}
+          {selectedCandidateCard.autoClassifiedModality === 'chemical_synthesis' &&
+            effectiveModality === 'mammalian_cho_bioreactor' && (
+              <div className="p-4 bg-rose-50 border border-rose-300 text-xs text-rose-950 flex items-center justify-between gap-3">
                 <div>
-                  <span className="text-[11px] font-mono font-bold uppercase text-sky-400">
-                    LIVE 500 L STIRRED-TANK PERFUSION + ATF HOLLOW-FIBRE CUTAWAY
-                  </span>
+                  <strong>Scientific Mismatch Warning:</strong> {selectedCandidateCard.name} is a
+                  412 Da synthetic small molecule. Small molecules are manufactured by organic
+                  chemical synthesis, not in a CHO mammalian bioreactor.
                 </div>
-                <span
-                  className={`px-2 py-0.5 text-[11px] font-mono font-bold ${
-                    isAllPhysicsFeasible
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                  }`}
-                >
-                  {isAllPhysicsFeasible ? 'ALL CONSTRAINTS FEASIBLE' : 'BOTTLENECK DETECTED'}
-                </span>
-              </div>
-
-              <div className="my-2 flex items-center justify-center">
-                <svg
-                  viewBox="0 0 600 310"
-                  className="w-full max-h-[300px]"
-                  role="img"
-                  aria-label="Interactive 500 L Stirred-Tank Bioreactor and Hollow-Fibre Filter Cutaway"
-                >
-                  <defs>
-                    <style>{`
-                      @keyframes demoImpellerSpin {
-                        0% { transform: scaleX(1); }
-                        50% { transform: scaleX(0.18); }
-                        100% { transform: scaleX(1); }
-                      }
-                      @keyframes demoBubbleRise {
-                        0% { transform: translateY(0px); opacity: 0.85; }
-                        100% { transform: translateY(-165px); opacity: 0.15; }
-                      }
-                    `}</style>
-                  </defs>
-
-                  {/* External ATF Hollow-Fibre Filter Module (Left) */}
-                  <g>
-                    <rect
-                      x="28"
-                      y="78"
-                      width="68"
-                      height="168"
-                      rx="8"
-                      fill="#0f172a"
-                      stroke={isFilterViolated ? '#f43f5e' : '#38bdf8'}
-                      strokeWidth="2"
-                    />
-                    {[42, 54, 66, 78].map((fx) => (
-                      <line
-                        key={fx}
-                        x1={fx}
-                        y1="88"
-                        x2={fx}
-                        y2="236"
-                        stroke={isFilterViolated ? '#fb7185' : '#38bdf8'}
-                        strokeWidth={Math.max(1.4, (hfParams.fibreInnerDiameterUm - 200) / 95)}
-                        strokeDasharray="4 2"
-                      />
-                    ))}
-                    {/* Recirculation Lines to Vessel */}
-                    <path
-                      d="M 96 105 L 155 105"
-                      stroke="#38bdf8"
-                      strokeWidth="3"
-                      fill="none"
-                    />
-                    <path
-                      d="M 155 225 L 96 225"
-                      stroke="#38bdf8"
-                      strokeWidth="3"
-                      fill="none"
-                    />
-                    <text x="20" y="66" fill="#94a3b8" fontSize="9.0" fontFamily="monospace">
-                      {(hfParams.retentionMode ?? 'atf_alternating') === 'atf_alternating'
-                        ? 'ATF'
-                        : 'TFF'}{' '}
-                      Filter ({hfParams.fibreInnerDiameterUm} μm · {hfParams.parallelCartridgesCount ?? 1}×)
-                    </text>
-                    <text
-                      x="20"
-                      y="259"
-                      fill={physicsResult.isHfPressureDropViolated ? '#fda4af' : '#6ee7b7'}
-                      fontSize="9.0"
-                      fontFamily="monospace"
-                    >
-                      ΔP: {physicsResult.hfPressureDropKpa.toFixed(1)}/35 kPa
-                    </text>
-                    <text
-                      x="20"
-                      y="272"
-                      fill={physicsResult.isHfWallShearViolated ? '#fda4af' : '#6ee7b7'}
-                      fontSize="9.0"
-                      fontFamily="monospace"
-                    >
-                      τ_w: {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)}/{physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa
-                    </text>
-                  </g>
-
-                  {/* Main 500 L Vessel Shell */}
-                  <rect
-                    x="155"
-                    y="36"
-                    width="220"
-                    height="238"
-                    rx="22"
-                    fill="#0f172a"
-                    stroke={isO2Starved || isShearViolated ? '#f43f5e' : '#10b981'}
-                    strokeWidth="2.5"
-                  />
-
-                  {/* Culture Medium Broth Fill */}
-                  <rect
-                    x="158"
-                    y="76"
-                    width="214"
-                    height="195"
-                    rx="18"
-                    fill={
-                      isO2Starved
-                        ? 'rgba(244, 63, 94, 0.22)'
-                        : isShearViolated
-                        ? 'rgba(245, 158, 11, 0.22)'
-                        : 'rgba(16, 185, 129, 0.20)'
-                    }
-                  />
-
-                  {/* Liquid Level Line */}
-                  <line
-                    x1="158"
-                    y1="76"
-                    x2="372"
-                    y2="76"
-                    stroke={isO2Starved ? '#fb7185' : '#34d399'}
-                    strokeWidth="2"
-                    strokeDasharray="5 3"
-                  />
-
-                  {/* Central Agitator Shaft */}
-                  <line
-                    x1="265"
-                    y1="22"
-                    x2="265"
-                    y2="252"
-                    stroke="#cbd5e1"
-                    strokeWidth="4"
-                  />
-
-                  {/* Impeller Stages (1, 2, or 3 impellers) */}
-                  {impellerStageYs.map((yPos, idx) => (
-                    <g
-                      key={idx}
-                      style={{
-                        transformOrigin: `265px ${yPos}px`,
-                        animation: `demoImpellerSpin ${rotationDurationSec.toFixed(2)}s infinite linear`,
-                      }}
-                    >
-                      <rect
-                        x={265 - bladeHalfSpanPx}
-                        y={yPos - 6}
-                        width={bladeHalfSpanPx * 2}
-                        height="12"
-                        rx={strParams.impellerType === 'rushton_radial' ? 1 : 6}
-                        fill={isShearViolated ? '#f43f5e' : '#38bdf8'}
-                      />
-                      <circle cx="265" cy={yPos} r="6" fill="#f8fafc" />
-                    </g>
-                  ))}
-
-                  {/* Bottom Sparger Assembly */}
-                  <rect
-                    x="210"
-                    y="256"
-                    width="110"
-                    height="8"
-                    rx="4"
-                    fill={
-                      strParams.spargerType === 'sintered_microsparger'
-                        ? '#38bdf8'
-                        : '#94a3b8'
-                    }
-                  />
-
-                  {/* Rising Oxygen Bubbles */}
-                  {(strParams.spargerType === 'sintered_microsparger'
-                    ? [185, 200, 215, 230, 245, 260, 275, 290, 305, 320, 335, 345]
-                    : [215, 245, 275, 305, 330]
-                  ).map((bx, i) => (
-                    <circle
-                      key={i}
-                      cx={bx}
-                      cy={248 - (i % 4) * 18}
-                      r={strParams.spargerType === 'sintered_microsparger' ? 2.6 : 6.2}
-                      fill={
-                        strParams.oxygenEnrichmentFraction > 0.25 ? '#38bdf8' : '#cbd5e1'
-                      }
-                      style={{
-                        animation: `demoBubbleRise ${(1.6 + (i % 3) * 0.45).toFixed(2)}s infinite linear`,
-                      }}
-                    />
-                  ))}
-
-                  {/* Right-Side Live Diagnostic Callouts */}
-                  <g>
-                    {/* Callout 1: Oxygen Balance */}
-                    <rect
-                      x="392"
-                      y="42"
-                      width="195"
-                      height="54"
-                      rx="4"
-                      fill="#0f172a"
-                      stroke={isO2Starved ? '#f43f5e' : '#10b981'}
-                      strokeWidth="1.5"
-                    />
-                    <text x="400" y="58" fill="#94a3b8" fontSize="9.5" fontFamily="monospace">
-                      1. OXYGEN SUPPLY vs DEMAND
-                    </text>
-                    <text
-                      x="400"
-                      y="74"
-                      fill={isO2Starved ? '#fda4af' : '#6ee7b7'}
-                      fontSize="11"
-                      fontWeight="bold"
-                      fontFamily="monospace"
-                    >
-                      OTR {physicsResult.otrMmolPerLHour.toFixed(1)} vs OUR{' '}
-                      {physicsResult.ourMmolPerLHour.toFixed(1)}
-                    </text>
-                    <text x="400" y="88" fill="#cbd5e1" fontSize="9.5" fontFamily="monospace">
-                      {isO2Starved
-                        ? 'FAIL: Cells starved of O₂'
-                        : `PASS: +${physicsResult.oxygenMarginMmolPerLHour.toFixed(1)} mmol/L/h margin`}
-                    </text>
-
-                    {/* Callout 2: Cell Shear Stress */}
-                    <rect
-                      x="392"
-                      y="106"
-                      width="195"
-                      height="52"
-                      rx="4"
-                      fill="#0f172a"
-                      stroke={isShearViolated ? '#f43f5e' : '#10b981'}
-                      strokeWidth="1.5"
-                    />
-                    <text x="400" y="122" fill="#94a3b8" fontSize="9.5" fontFamily="monospace">
-                      2. IMPELLER CELL SHEAR
-                    </text>
-                    <text
-                      x="400"
-                      y="138"
-                      fill={isShearViolated ? '#fda4af' : '#6ee7b7'}
-                      fontSize="11"
-                      fontWeight="bold"
-                      fontFamily="monospace"
-                    >
-                      τ = {physicsResult.estimatedShearStressPa.toFixed(2)} Pa (≤{' '}
-                      {groundedParams.shearThresholdPa} Pa)
-                    </text>
-                    <text x="400" y="151" fill="#cbd5e1" fontSize="9.5" fontFamily="monospace">
-                      Eddy λ_K = {physicsResult.kolmogorovScaleUm.toFixed(1)} μm (&gt; 18 μm)
-                    </text>
-
-                    {/* Callout 3: Bulk Mixing Time */}
-                    <rect
-                      x="392"
-                      y="168"
-                      width="195"
-                      height="52"
-                      rx="4"
-                      fill="#0f172a"
-                      stroke={isMixingSlow ? '#f43f5e' : '#38bdf8'}
-                      strokeWidth="1.5"
-                    />
-                    <text x="400" y="184" fill="#94a3b8" fontSize="9.5" fontFamily="monospace">
-                      3. GASSED MIXING TIME
-                    </text>
-                    <text
-                      x="400"
-                      y="200"
-                      fill={isMixingSlow ? '#fda4af' : '#7dd3fc'}
-                      fontSize="11"
-                      fontWeight="bold"
-                      fontFamily="monospace"
-                    >
-                      t_m = {physicsResult.mixingTimeGassedS.toFixed(1)} s (≤ 60 s limit)
-                    </text>
-                    <text x="400" y="213" fill="#cbd5e1" fontSize="9.5" fontFamily="monospace">
-                      {strParams.impellerCount}× {IMPELLER_GEOMETRY_SPECS[strParams.impellerType].shortLabel} (D/T={strParams.diameterRatioDiDt.toFixed(2)})
-                    </text>
-
-                    {/* Callout 4: Power & Sparger */}
-                    <rect
-                      x="392"
-                      y="230"
-                      width="195"
-                      height="46"
-                      rx="4"
-                      fill="#0f172a"
-                      stroke="#475569"
-                      strokeWidth="1.2"
-                    />
-                    <text x="400" y="246" fill="#94a3b8" fontSize="9.5" fontFamily="monospace">
-                      4. SPECIFIC POWER &amp; k_La
-                    </text>
-                    <text x="400" y="263" fill="#e2e8f0" fontSize="10.5" fontFamily="monospace">
-                      P_g/V = {physicsResult.specificPowerWPerM3.toFixed(0)} W/m³ · k_La ={' '}
-                      {physicsResult.klaPerHour.toFixed(1)} h⁻¹
-                    </text>
-                  </g>
-                </svg>
-              </div>
-
-              <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-slate-400">
-                <span>
-                  Model-informed explanatory visualisation — not validated CFD or experimentally measured flow behaviour.
-                </span>
                 <button
                   type="button"
-                  onClick={() => onSwitchToWorkbenchSection('mass_balance')}
-                  className="text-sky-400 hover:underline cursor-pointer"
+                  onClick={() => setResearcherModalityOverride(null)}
+                  className="px-3 py-1.5 font-semibold bg-rose-700 text-white hover:bg-rose-800 cursor-pointer shrink-0"
                 >
-                  Open Full Engineering Workbench →
+                  Restore Chemical Synthesis Route
                 </button>
               </div>
-            </div>
+            )}
 
-            {/* Right 5 Cols: Interactive Engineering Sliders & Live Constraint Bars */}
-            <div className="lg:col-span-5 bg-slate-50 border border-slate-200 p-4 flex flex-col justify-between space-y-3">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase font-mono text-slate-900 flex items-center gap-1.5">
-                    <Sliders className="w-3.5 h-3.5 text-blue-600" />
-                    Try Adjusting Reactor Settings Live
-                  </span>
-                  <span className="text-[11px] font-mono text-slate-500">
-                    Volume: {strParams.workingVolumeL} L
-                  </span>
+          {/* CASE A: SMALL-MOLECULE CHEMICAL SYNTHESIS FEASIBILITY */}
+          {effectiveModality === 'chemical_synthesis' && (
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 bg-slate-50 border border-slate-200 space-y-1.5">
+                  <div className="text-xs font-mono text-slate-500">
+                    1. SYNTHETIC ACCESSIBILITY CRITIC
+                  </div>
+                  <div className="text-base font-bold text-slate-950">
+                    SA Score: {liveCandidateCritic.synthesisability.sa_score} / 10 (Threshold ≤ 4.5)
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    Evaluates fragment frequency and topological complexity (Ertl &amp;
+                    Schuffenhauer). Zero chiral centres mean no costly enantiomeric separation is
+                    required.
+                  </p>
                 </div>
 
-                {/* Sparger Type Toggle */}
-                <div className="space-y-1">
-                  <label className="block text-[11px] font-mono font-semibold text-slate-700">
-                    1. Sparger Hardware (Bubble Size &amp; k_La Multiplier)
-                  </label>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onUpdateStrParams({ ...strParams, spargerType: 'open_pipe' })
-                      }
-                      className={`py-1.5 px-2 text-xs font-mono border cursor-pointer ${
-                        strParams.spargerType === 'open_pipe'
-                          ? 'bg-slate-900 text-white border-slate-900 font-bold'
-                          : 'bg-white text-slate-700 border-slate-300'
-                      }`}
-                    >
-                      Open-Pipe (6 mm · 1.0×)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onUpdateStrParams({
-                          ...strParams,
-                          spargerType: 'sintered_microsparger',
-                        })
-                      }
-                      className={`py-1.5 px-2 text-xs font-mono border cursor-pointer ${
-                        strParams.spargerType === 'sintered_microsparger'
-                          ? 'bg-blue-600 text-white border-blue-600 font-bold'
-                          : 'bg-white text-slate-700 border-slate-300'
-                      }`}
-                    >
-                      15 μm Microsparger (3.4×)
-                    </button>
+                <div className="p-4 bg-slate-50 border border-slate-200 space-y-1.5">
+                  <div className="text-xs font-mono text-slate-500">
+                    2. PROCESS-CHEMISTRY ROUTE &amp; STEPS
                   </div>
+                  <div className="text-base font-bold text-slate-950">
+                    {selectedCandidateCard.estimatedStepsOrProcess}
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    Convergent synthesis from commercially available aryl boronic acid and sulfonyl
+                    chloride building blocks, isolated by direct crystallisation.
+                  </p>
                 </div>
 
-                {/* Impeller Type & Count */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-mono font-semibold text-slate-700 mb-1">
-                      2. Impeller Type
-                    </label>
-                    <select
-                      aria-label="Impeller Type"
-                      value={strParams.impellerType}
-                      onChange={(e) =>
-                        onUpdateStrParams({
-                          ...strParams,
-                          impellerType: e.target.value as ImpellerType,
-                        })
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono bg-white border border-slate-300 text-slate-900"
-                    >
-                      <option value="marine_axial">Marine Propeller (N_P=0.35)</option>
-                      <option value="pitched_blade">Pitched-Blade (N_P=1.27)</option>
-                      <option value="rushton_radial">Rushton Turbine (N_P=5.0)</option>
-                    </select>
+                <div className="p-4 bg-slate-50 border border-slate-200 space-y-1.5">
+                  <div className="text-xs font-mono text-slate-500">
+                    3. HEURISTIC COST &amp; TIME ESTIMATE
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-mono font-semibold text-slate-700 mb-1">
-                      3. Impeller Count (n)
-                    </label>
-                    <div className="grid grid-cols-3 gap-1">
-                      {([1, 2, 3] as const).map((nVal) => (
-                        <button
-                          key={nVal}
-                          type="button"
-                          onClick={() =>
-                            onUpdateStrParams({ ...strParams, impellerCount: nVal })
-                          }
-                          className={`py-1.5 text-xs font-mono border cursor-pointer ${
-                            strParams.impellerCount === nVal
-                              ? 'bg-slate-900 text-white border-slate-900 font-bold'
-                              : 'bg-white text-slate-700 border-slate-300'
-                          }`}
-                        >
-                          {nVal}×
-                        </button>
-                      ))}
-                    </div>
+                  <div className="text-base font-bold text-emerald-800">
+                    {selectedCandidateCard.estimatedCostAndTime}
                   </div>
-                </div>
-
-                {/* RPM & Inlet O2 Sliders */}
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <div className="bg-white border border-slate-200 p-2.5">
-                    <div className="flex justify-between text-[11px] font-mono">
-                      <span className="text-slate-600">Agitation RPM</span>
-                      <span className="font-bold text-slate-900">
-                        {strParams.stirrerSpeedRpm} RPM
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      aria-label="Agitation RPM"
-                      min={60}
-                      max={220}
-                      step={5}
-                      value={strParams.stirrerSpeedRpm}
-                      onChange={(e) =>
-                        onUpdateStrParams({
-                          ...strParams,
-                          stirrerSpeedRpm: Number(e.target.value),
-                        })
-                      }
-                      className="w-full mt-1 accent-blue-600 cursor-pointer"
-                    />
-                    <div className="text-[10px] font-mono text-slate-500 mt-0.5">
-                      Higher RPM speeds mixing but raises cell shear τ.
-                    </div>
-                  </div>
-
-                  <div className="bg-white border border-slate-200 p-2.5">
-                    <div className="flex justify-between text-[11px] font-mono">
-                      <span className="text-slate-600">Inlet Gas O₂ %</span>
-                      <span className="font-bold text-slate-900">
-                        {(strParams.oxygenEnrichmentFraction * 100).toFixed(0)}% O₂
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      aria-label="Inlet Gas Oxygen Percentage"
-                      min={21}
-                      max={65}
-                      step={1}
-                      value={Math.round(strParams.oxygenEnrichmentFraction * 100)}
-                      onChange={(e) =>
-                        onUpdateStrParams({
-                          ...strParams,
-                          oxygenEnrichmentFraction: Number(e.target.value) / 100,
-                        })
-                      }
-                      className="w-full mt-1 accent-blue-600 cursor-pointer"
-                    />
-                    <div className="text-[10px] font-mono text-slate-500 mt-0.5">
-                      21% = Air; &gt;21% = O₂-enriched sparge gas.
-                    </div>
-                  </div>
-                </div>
-
-                {/* Live Constraint Load Summary (Separates Bioreactor vs External Filter Sub-Criteria) */}
-                <div className="bg-white border border-slate-200 p-3 space-y-2">
-                  <div className="text-[11px] font-mono font-bold text-slate-800 uppercase">
-                    Live Constraint Load (% of Safe Limit — ≤ 100% Required)
-                  </div>
-                  {[
-                    {
-                      label: 'Oxygen Supply vs. Demand (OTR vs. OUR)',
-                      pct: currentRadarLoads.oxygenLoadPct,
-                      val: `OTR ${physicsResult.otrMmolPerLHour.toFixed(1)} vs OUR ${physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h`,
-                      status: isO2Starved ? 'FAIL' : 'PASS',
-                    },
-                    {
-                      label: 'Vessel Impeller Turbulent Shear (τ_imp ≤ 1.65 Pa)',
-                      pct: currentRadarLoads.shearLoadPct,
-                      val: `${physicsResult.estimatedShearStressPa.toFixed(2)} / ${groundedParams.shearThresholdPa.toFixed(2)} Pa`,
-                      status: isShearViolated ? 'FAIL' : 'PASS',
-                    },
-                    {
-                      label: 'Gassed Bulk Mixing Time (t_m ≤ 60 s)',
-                      pct: currentRadarLoads.mixingLoadPct,
-                      val: `${physicsResult.mixingTimeGassedS.toFixed(1)} / 60.0 s`,
-                      status: isMixingSlow ? 'FAIL' : 'PASS',
-                    },
-                    {
-                      label: 'Filter Lumen Wall Shear (τ_w,HF ≤ 2.50 Pa laminar)',
-                      pct: physicsResult.hfWallShearLoadPct,
-                      val: `${physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} / ${physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa`,
-                      status: physicsResult.isHfWallShearViolated ? 'FAIL' : 'PASS',
-                    },
-                    {
-                      label: 'Filter Axial Pressure Drop (ΔP_HF ≤ 35.0 kPa)',
-                      pct: physicsResult.hfPressureDropLoadPct,
-                      val: `${physicsResult.hfPressureDropKpa.toFixed(1)} / ${physicsResult.hfPressureDropLimitKpa.toFixed(1)} kPa`,
-                      status: physicsResult.isHfPressureDropViolated ? 'FAIL' : 'PASS',
-                    },
-                  ].map((item) => (
-                    <div key={item.label} className="space-y-0.5">
-                      <div className="flex justify-between text-[11px] font-mono gap-1">
-                        <span className="text-slate-700 truncate">{item.label}</span>
-                        <span
-                          className={`font-bold shrink-0 ${
-                            item.pct > 100
-                              ? 'text-rose-700'
-                              : item.pct > 85
-                              ? 'text-amber-700'
-                              : 'text-emerald-700'
-                          }`}
-                        >
-                          {item.val} ({item.pct.toFixed(0)}% · {item.status})
-                        </span>
-                      </div>
-                      <div className="w-full h-2 bg-slate-100 overflow-hidden">
-                        <div
-                          className={`h-full transition-all ${
-                            item.pct > 100
-                              ? 'bg-rose-600'
-                              : item.pct > 85
-                              ? 'bg-amber-500'
-                              : 'bg-emerald-600'
-                          }`}
-                          style={{ width: `${Math.min(100, item.pct)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* Filter Anti-Fouling & Axial DO Quick Check */}
-                  <div className="pt-1.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono">
-                    <span
-                      className={
-                        physicsResult.isHfFoulingVelocityTooLow
-                          ? 'text-rose-700 font-bold'
-                          : 'text-slate-600'
-                      }
-                    >
-                      Crossflow γ_w: {physicsResult.hfWallShearRatePerS} s⁻¹ (≥{' '}
-                      {physicsResult.hfMinAntiFoulingShearRatePerS} s⁻¹ anti-fouling:{' '}
-                      {physicsResult.isHfFoulingVelocityTooLow ? 'FAIL — FOULING' : 'PASS'})
-                    </span>
-                    <span
-                      className={
-                        physicsResult.hfAxialOxygenDepleted
-                          ? 'text-rose-700 font-bold'
-                          : 'text-slate-600'
-                      }
-                    >
-                      Filter Outlet DO: {physicsResult.hfOutletDoPercent.toFixed(1)}% (≥ 20%:{' '}
-                      {physicsResult.hfAxialOxygenDepleted ? 'FAIL' : 'PASS'})
-                    </span>
-                  </div>
+                  <p className="text-xs text-slate-600">
+                    Order-of-magnitude medicinal chemistry estimate (not a supplier quote). Avoids
+                    the &gt;$20k / 10–14 week bottleneck of chiral glycoside hit R1-C01.
+                  </p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="p-4 bg-blue-50/60 border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div>
+                  <strong className="text-slate-950">
+                    Want to inspect the 500 L CHO Bioreactor demonstration as well?
+                  </strong>{' '}
+                  <span className="text-slate-700">
+                    Because {selectedCandidateCard.name.split('(')[0].trim()} is a small molecule,
+                    it never enters a bioreactor. Select <strong>Trastuzumab (HER2 IgG1)</strong> to
+                    see the animated 500 L CHO bioreactor simulator.
+                  </span>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
-                    setShowFilterSettingsPanel(true);
-                    setShowFilterSuggestionsPanel(true);
+                    const tras = PASSED_CANDIDATE_GALLERY.find(
+                      (c) => c.id === 'her2_trastuzumab_mab'
+                    );
+                    if (tras) handleSelectGalleryCandidate(tras);
                   }}
-                  className="py-2 px-3 text-xs font-mono font-bold bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer flex items-center justify-center gap-1.5"
+                  className="px-3.5 py-2 font-semibold bg-blue-700 text-white hover:bg-blue-800 cursor-pointer whitespace-nowrap shrink-0"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Suggest Filter Improvements</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveStep(3)}
-                  className="py-2 px-3 text-xs font-mono font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <span>Step 3: Full Optimiser →</span>
+                  Switch to Trastuzumab (500 L Bioreactor Example) →
                 </button>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* =====================================================================
-              EXPANDABLE CELL-RETENTION FILTER SETTINGS & INTERVENTION PANEL
-             ===================================================================== */}
-          <div
-            className={`border ${
-              isFilterViolated
-                ? 'border-rose-400 bg-rose-50/40'
-                : 'border-slate-300 bg-slate-50/70'
-            }`}
-          >
-            <div className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 bg-white">
-              <button
-                type="button"
-                onClick={() => setShowFilterSettingsPanel((v) => !v)}
-                className="flex items-center gap-2 text-left cursor-pointer"
+          {/* CASE B: MAMMALIAN CHO BIOMANUFACTURING (INTERACTIVE ANIMATED 500 L BIOREACTOR) */}
+          {effectiveModality === 'mammalian_cho_bioreactor' && (
+            <div className="space-y-5">
+              {/* Plain-English Bottleneck Status Strip */}
+              <div
+                className={`p-4 border flex flex-col lg:flex-row lg:items-center justify-between gap-3 ${
+                  isAllPhysicsFeasible
+                    ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
+                    : 'bg-rose-50/80 border-rose-300 text-rose-950'
+                }`}
               >
-                <Sliders className="w-4 h-4 text-indigo-600 shrink-0" />
-                <div>
-                  <div className="text-xs font-mono font-bold uppercase text-slate-900 flex flex-wrap items-center gap-2">
-                    <span>
-                      Cell-Retention Filter Settings (External{' '}
-                      {(hfParams.retentionMode ?? 'atf_alternating') === 'atf_alternating'
-                        ? 'ATF Alternating Diaphragm'
-                        : 'TFF Steady Pump'}{' '}
-                      Circuit)
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 text-[10px] font-mono font-bold ${
-                        isFilterViolated
-                          ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                          : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                      }`}
-                    >
-                      {isFilterViolated
-                        ? `FILTER FAIL — τ_w ${physicsResult.hfEffectiveWallShearStressPa.toFixed(2)}/${physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa (${physicsResult.hfWallShearLoadPct.toFixed(0)}%) · ΔP ${physicsResult.hfPressureDropKpa.toFixed(1)}/35 kPa`
-                        : `FILTER PASS — τ_w ${physicsResult.hfEffectiveWallShearStressPa.toFixed(2)}/${physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa (${physicsResult.hfWallShearLoadPct.toFixed(0)}%) · ΔP ${physicsResult.hfPressureDropKpa.toFixed(1)}/35 kPa`}
-                    </span>
+                <div className="space-y-1 text-xs">
+                  <div className="font-bold text-sm">
+                    {isAllPhysicsFeasible
+                      ? '✓ All 500 L Bioreactor & Filter Constraints Satisfied'
+                      : isO2Starved
+                      ? '⚠ Bottleneck Detected: The cells need more oxygen than the reactor can currently deliver (OTR < OUR).'
+                      : isFilterViolated
+                      ? '⚠ Bottleneck Detected: Cell-retention hollow-fibre filter lumen shear exceeds the 1.65 Pa safe limit.'
+                      : '⚠ Bottleneck Detected: Mixing time or impeller shear violates safe CHO operating limits.'}
                   </div>
-                  <p className="text-[11px] text-slate-600 mt-0.5">
-                    Controls the external hollow-fibre perfusion loop (Hagen–Poiseuille lumen hydraulics: ΔP ∝ L_f·Q/(N·d_f⁴), τ_w ∝ Q/(N·d_f³)).
+                  <p>
+                    Oxygen Supply (OTR):{' '}
+                    <strong className="font-mono">
+                      {physicsResult.otrMmolPerLHour.toFixed(1)} mmol/L/h
+                    </strong>{' '}
+                    vs. Cellular Demand (OUR):{' '}
+                    <strong className="font-mono">
+                      {physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h
+                    </strong>{' '}
+                    · Impeller Shear:{' '}
+                    <strong className="font-mono">
+                      {physicsResult.estimatedShearStressPa.toFixed(2)} Pa
+                    </strong>{' '}
+                    · Mixing Time:{' '}
+                    <strong className="font-mono">
+                      {physicsResult.mixingTimeGassedS.toFixed(1)} s
+                    </strong>{' '}
+                    · Filter Wall Shear:{' '}
+                    <strong className="font-mono">
+                      {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} Pa
+                    </strong>
                   </p>
                 </div>
-              </button>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowFilterSettingsPanel(true);
-                    setShowFilterSuggestionsPanel((v) => !v);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-bold bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  {showFilterSuggestionsPanel
-                    ? 'Hide Filter Suggestions'
-                    : 'Suggest Filter Improvements (3 Options)'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowFilterSettingsPanel((v) => !v)}
-                  className="p-1.5 text-slate-600 hover:bg-slate-100 border border-slate-200 cursor-pointer"
-                  aria-label="Toggle Cell-Retention Filter Settings"
-                >
-                  {showFilterSettingsPanel ? (
-                    <ChevronUp className="w-4 h-4" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4" />
-                  )}
-                </button>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={onTriggerOxygenDeficitDemo}
+                    className="px-3 py-1.5 text-xs font-medium bg-white border border-slate-300 text-slate-800 hover:bg-slate-100 cursor-pointer"
+                  >
+                    Reset to Failing 500 L Baseline
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveStage('optimise')}
+                    className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-800 cursor-pointer"
+                  >
+                    Ask bioREACT to Fix All Bottlenecks →
+                  </button>
+                </div>
               </div>
-            </div>
 
-            {showFilterSettingsPanel && (
-              <div className="p-4 space-y-4 bg-white">
-                {/* Scientific Distinction Callout: Why 1.65 Pa Impeller Shear != 2.50 Pa Laminar Lumen Wall Shear */}
-                <div className="p-3 bg-slate-900 text-slate-100 border border-slate-800 text-xs space-y-1.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-mono font-bold text-sky-400 uppercase text-[11px]">
-                      SCIENTIFIC DISTINCTION · TURBULENT IMPELLER SHEAR (≤ 1.65 Pa) vs. LAMINAR HOLLOW-FIBRE LUMEN SHEAR (≤ 2.50 Pa)
+              {/* Interactive Animated Bioreactor Cutaway + Essential Controls */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+                {/* Left 7 Cols: Animated 500 L Bioreactor SVG */}
+                <div className="lg:col-span-7 bg-slate-950 border border-slate-800 p-4 flex flex-col justify-between text-slate-100">
+                  <div className="flex items-center justify-between text-xs font-mono pb-2 border-b border-slate-800">
+                    <span className="text-cyan-400 font-bold">
+                      LIVE 500 L STIRRED-TANK BIOREACTOR CUTAWAY
                     </span>
-                    <span className="font-mono text-[10px] px-2 py-0.5 bg-slate-800 text-slate-300">
-                      Lumen Re = {physicsResult.hfLumenReynoldsNumber.toFixed(1)} (Strictly Laminar ≪ 2,100) · Wo = {physicsResult.hfWomersleyNumber.toFixed(2)}
+                    <span className="text-slate-400">
+                      {strParams.stirrerSpeedRpm} RPM · {strParams.impellerCount}×{' '}
+                      {strParams.impellerType} ·{' '}
+                      {(strParams.oxygenEnrichmentFraction * 100).toFixed(0)}% O₂
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
-                    <strong>1. Why Bioreactor Controls Don&apos;t Change Filter Hydraulics:</strong> RPM, impeller count, and sparger O₂% control the stirred-tank vessel, whereas the cell-retention filter is an external recirculation loop governed by fibre inner diameter (<code>d_f</code>), fibre length (<code>L_f</code>), total fibres (<code>N_fibres × N_cartridges</code>), and recirculation flow (<code>Q_HF</code>).
-                  </p>
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
-                    <strong>2. Separate Physical Shear Mechanisms &amp; Limits:</strong> Inside the stirred vessel, cells face continuous 3D isotropic turbulent eddies and blade-tip trailing vortices (<strong>τ_imp ≤ {groundedParams.shearThresholdPa.toFixed(2)} Pa</strong>, Kolmogorov <strong>λ_K ≥ 18 μm</strong>; Nienow 1997; Neunstoecklin et al. 2015). Inside smooth hollow-fibre capillaries, flow is laminar Hagen–Poiseuille flow (<code>Re = {physicsResult.hfLumenReynoldsNumber.toFixed(1)}</code>) with brief 2–5 s single-pass transit and axial cell migration away from walls. Literature for 30-day CHO perfusion (Clincke et al. 2013; Kelly et al. 2014; Karst et al. 2016) establishes a separate <strong>laminar lumen wall-shear ceiling of τ_w,crit = 2.50 Pa cycle-mean</strong> (γ_w ≤ 2,809 s⁻¹; ATF peak half-cycle ≤ 3.93 Pa) to prevent sub-lethal LDH/HCP release, alongside a <strong>minimum anti-fouling crossflow floor of γ_w ≥ {physicsResult.hfMinAntiFoulingShearRatePerS} s⁻¹</strong> and <strong>ΔP_HF ≤ 35.0 kPa</strong>.
-                  </p>
+
+                  <div className="my-2 flex items-center justify-center">
+                    <svg
+                      viewBox="0 0 500 320"
+                      className="w-full max-h-[300px]"
+                      role="img"
+                      aria-label="Interactive 500 L Stirred-Tank Bioreactor Cutaway"
+                    >
+                      {/* Vessel Body */}
+                      <rect
+                        x="130"
+                        y="35"
+                        width="220"
+                        height="245"
+                        rx="24"
+                        fill="#0f172a"
+                        stroke={isAllPhysicsFeasible ? '#10b981' : '#f43f5e'}
+                        strokeWidth="3"
+                      />
+                      {/* Culture Liquid */}
+                      <rect
+                        x="134"
+                        y="75"
+                        width="212"
+                        height="201"
+                        rx="18"
+                        fill={isO2Starved ? 'rgba(244,63,94,0.18)' : 'rgba(16,185,129,0.16)'}
+                      />
+                      {/* Central Shaft */}
+                      <line
+                        x1="240"
+                        y1="20"
+                        x2="240"
+                        y2="255"
+                        stroke="#94a3b8"
+                        strokeWidth="5"
+                      />
+                      {/* Impeller Stages */}
+                      {impellerStageYs.map((yPos, idx) => (
+                        <g key={idx}>
+                          <line
+                            x1={240 - bladeHalfSpanPx}
+                            y1={yPos}
+                            x2={240 + bladeHalfSpanPx}
+                            y2={yPos}
+                            stroke={isShearViolated ? '#f43f5e' : '#38bdf8'}
+                            strokeWidth="6"
+                          >
+                            <animateTransform
+                              attributeName="transform"
+                              type="scale"
+                              values="1 1; -1 1; 1 1"
+                              dur={`${rotationDurationSec}s`}
+                              repeatCount="indefinite"
+                              additive="sum"
+                            />
+                          </line>
+                          <circle cx="240" cy={yPos} r="6" fill="#e2e8f0" />
+                        </g>
+                      ))}
+                      {/* Bottom Sparger */}
+                      <rect
+                        x="185"
+                        y="260"
+                        width="110"
+                        height="8"
+                        rx="4"
+                        fill={
+                          strParams.spargerType === 'sintered_microsparger'
+                            ? '#22d3ee'
+                            : '#f59e0b'
+                        }
+                      />
+                      {/* Rising O2 Bubbles */}
+                      {[195, 215, 235, 255, 275, 290].map((bx, i) => (
+                        <circle
+                          key={i}
+                          cx={bx}
+                          cy={250 - (i % 3) * 45}
+                          r={strParams.spargerType === 'sintered_microsparger' ? 3 : 6}
+                          fill={isO2Starved ? '#fda4af' : '#67e8f9'}
+                          opacity="0.8"
+                        >
+                          <animate
+                            attributeName="cy"
+                            from="258"
+                            to="85"
+                            dur={`${1.8 + (i % 3) * 0.5}s`}
+                            repeatCount="indefinite"
+                          />
+                        </circle>
+                      ))}
+                      {/* External Hollow-Fibre Filter Module */}
+                      <rect
+                        x="385"
+                        y="110"
+                        width="48"
+                        height="125"
+                        rx="8"
+                        fill="#1e293b"
+                        stroke={isFilterViolated ? '#f43f5e' : '#10b981'}
+                        strokeWidth="2.5"
+                      />
+                      <text
+                        x="409"
+                        y="102"
+                        textAnchor="middle"
+                        fill={isFilterViolated ? '#fda4af' : '#6ee7b7'}
+                        fontSize="9"
+                        fontFamily="monospace"
+                      >
+                        {hfParams.retentionMode === 'atf_alternating' ? 'ATF' : 'TFF'} ×
+                        {hfParams.parallelCartridgesCount ?? 1}
+                      </text>
+                      <text
+                        x="409"
+                        y="250"
+                        textAnchor="middle"
+                        fill={isFilterViolated ? '#fda4af' : '#94a3b8'}
+                        fontSize="9"
+                        fontFamily="monospace"
+                      >
+                        τ_w {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} Pa
+                      </text>
+                    </svg>
+                  </div>
+
+                  <div className="text-[11px] font-mono text-slate-300 flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
+                    <span>
+                      Sparger:{' '}
+                      {strParams.spargerType === 'sintered_microsparger'
+                        ? '15 μm Sintered Microsparger'
+                        : 'Open-Pipe Sparger'}
+                    </span>
+                    <span>kLa = {physicsResult.klaPerHour.toFixed(1)} h⁻¹</span>
+                  </div>
                 </div>
 
-                {/* Interactive Filter Controls Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {/* Control 1: Filtration Mode (ATF vs TFF) & Parallel Cartridges */}
-                  <div className="p-3 bg-slate-50 border border-slate-200 space-y-2.5">
-                    <div>
-                      <label className="block text-[11px] font-mono font-bold text-slate-800 mb-1">
-                        1. Filtration Mode (ATF Oscillating vs. TFF Steady)
-                      </label>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {(
-                          [
-                            {
-                              id: 'atf_alternating',
-                              label: 'ATF Alternating',
-                              sub: 'Diaphragm (No Pump)',
-                            },
-                            {
-                              id: 'tff_steady',
-                              label: 'TFF Steady Loop',
-                              sub: 'Pump (+0.38 Pa head)',
-                            },
-                          ] as Array<{
-                            id: CellRetentionFiltrationMode;
-                            label: string;
-                            sub: string;
-                          }>
-                        ).map((m) => {
-                          const active =
-                            (hfParams.retentionMode ?? 'atf_alternating') === m.id;
-                          return (
-                            <button
-                              key={m.id}
-                              type="button"
-                              onClick={() =>
-                                onUpdateHfParams({
-                                  ...hfParams,
-                                  retentionMode: m.id,
-                                })
-                              }
-                              className={`p-1.5 text-left border font-mono cursor-pointer ${
-                                active
-                                  ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                              }`}
-                            >
-                              <div className="text-[11px]">{m.label}</div>
-                              <div
-                                className={`text-[9px] ${
-                                  active ? 'text-indigo-100' : 'text-slate-500'
-                                }`}
-                              >
-                                {m.sub}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+                {/* Right 5 Cols: Clean Reactor Controls + Expandable Filter Hydraulics Dropdown */}
+                <div className="lg:col-span-5 bg-slate-50 border border-slate-200 p-5 flex flex-col justify-between space-y-4 text-xs">
+                  <div className="space-y-3">
+                    <div className="font-bold text-slate-900">
+                      Adjust 500 L Bioreactor Operating Controls
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-mono font-bold text-slate-800 mb-1">
-                        2. Parallel Filter Cartridges (N_cartridges)
-                      </label>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {[1, 2, 3].map((count) => {
-                          const active =
-                            (hfParams.parallelCartridgesCount ?? 1) === count;
-                          return (
-                            <button
-                              key={count}
-                              type="button"
-                              onClick={() =>
-                                onUpdateHfParams({
-                                  ...hfParams,
-                                  parallelCartridgesCount: count,
-                                })
-                              }
-                              className={`py-1.5 text-xs font-mono border cursor-pointer ${
-                                active
-                                  ? 'bg-slate-900 text-white border-slate-900 font-bold'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                              }`}
-                            >
-                              {count}× ({(( count * hfParams.numberOfFibres) / 1000).toFixed(1)}k)
-                            </button>
-                          );
-                        })}
+                      <div className="flex justify-between font-medium text-slate-700 mb-1">
+                        <span>Impeller Speed (RPM)</span>
+                        <span className="font-mono font-bold">{strParams.stirrerSpeedRpm} RPM</span>
                       </div>
+                      <input
+                        type="range"
+                        min={50}
+                        max={160}
+                        value={strParams.stirrerSpeedRpm}
+                        onChange={(e) =>
+                          onUpdateStrParams({
+                            ...strParams,
+                            stirrerSpeedRpm: Number(e.target.value),
+                          })
+                        }
+                        className="w-full"
+                      />
                     </div>
-                  </div>
 
-                  {/* Control 2: Fibre Inner Diameter (d_f) & Quick Presets */}
-                  <div className="p-3 bg-slate-50 border border-slate-200 space-y-2">
-                    <div className="flex items-center justify-between text-[11px] font-mono">
-                      <span className="font-bold text-slate-800">
-                        3. Fibre Lumen ID (d_f)
-                      </span>
-                      <span className="font-bold text-indigo-700">
-                        {hfParams.fibreInnerDiameterUm} μm
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      aria-label="Hollow-Fibre Inner Diameter (micrometers)"
-                      min={200}
-                      max={450}
-                      step={10}
-                      value={hfParams.fibreInnerDiameterUm}
-                      onChange={(e) =>
-                        onUpdateHfParams({
-                          ...hfParams,
-                          fibreInnerDiameterUm: Number(e.target.value),
-                        })
-                      }
-                      className="w-full accent-indigo-600 cursor-pointer"
-                    />
-                    <div className="flex items-center justify-between gap-1">
-                      {[250, 280, 320, 340, 380].map((dfPreset) => (
-                        <button
-                          key={dfPreset}
-                          type="button"
-                          onClick={() =>
-                            onUpdateHfParams({
-                              ...hfParams,
-                              fibreInnerDiameterUm: dfPreset,
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block font-medium text-slate-700 mb-1">
+                          Impeller Type
+                        </label>
+                        <select
+                          value={strParams.impellerType}
+                          onChange={(e) =>
+                            onUpdateStrParams({
+                              ...strParams,
+                              impellerType: e.target.value as ImpellerType,
                             })
                           }
-                          className={`px-1.5 py-0.5 text-[10px] font-mono border cursor-pointer ${
-                            hfParams.fibreInnerDiameterUm === dfPreset
-                              ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
-                              : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                          }`}
+                          className="w-full px-2 py-1.5 bg-white border border-slate-300"
                         >
-                          {dfPreset}μm
-                        </button>
-                      ))}
+                          <option value="pitched_blade">Pitched-Blade (Low Shear)</option>
+                          <option value="marine_axial">Marine Hydrofoil</option>
+                          <option value="rushton_radial">Rushton Turbine (High Shear)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block font-medium text-slate-700 mb-1">
+                          Sparger Type
+                        </label>
+                        <select
+                          value={strParams.spargerType}
+                          onChange={(e) =>
+                            onUpdateStrParams({
+                              ...strParams,
+                              spargerType: e.target.value as StirredTankPhysicsParams['spargerType'],
+                            })
+                          }
+                          className="w-full px-2 py-1.5 bg-white border border-slate-300"
+                        >
+                          <option value="open_pipe">Open-Pipe (Large Bubbles)</option>
+                          <option value="sintered_microsparger">15 μm Microsparger</option>
+                        </select>
+                      </div>
                     </div>
-                    <div className="text-[10px] font-mono text-slate-600">
-                      Cubic/quartic lever: τ_w ∝ d_f⁻³ and ΔP ∝ d_f⁻⁴. Widening 280 → 340 μm cuts τ_w by 44%!
-                    </div>
-                  </div>
 
-                  {/* Control 3: Recirculation Flow Rate (Q_HF), Fibre Length (L_f), and Fibre Count */}
-                  <div className="p-3 bg-slate-50 border border-slate-200 space-y-2">
                     <div>
-                      <div className="flex items-center justify-between text-[11px] font-mono">
-                        <span className="font-bold text-slate-800">
-                          4. Exchange Flow (Q_HF)
-                        </span>
-                        <span className="font-bold text-indigo-700">
-                          {hfParams.recirculationFlowLMin.toFixed(1)} L/min
+                      <div className="flex justify-between font-medium text-slate-700 mb-1">
+                        <span>Inlet Oxygen Enrichment (%)</span>
+                        <span className="font-mono font-bold">
+                          {(strParams.oxygenEnrichmentFraction * 100).toFixed(0)}% O₂
                         </span>
                       </div>
                       <input
                         type="range"
-                        aria-label="Filter Recirculation Flow Rate (L/min)"
-                        min={1.5}
-                        max={12.0}
-                        step={0.1}
-                        value={hfParams.recirculationFlowLMin}
+                        min={21}
+                        max={60}
+                        value={Math.round(strParams.oxygenEnrichmentFraction * 100)}
                         onChange={(e) =>
-                          onUpdateHfParams({
-                            ...hfParams,
-                            recirculationFlowLMin: Number(e.target.value),
+                          onUpdateStrParams({
+                            ...strParams,
+                            oxygenEnrichmentFraction: Number(e.target.value) / 100,
                           })
                         }
-                        className="w-full accent-indigo-600 cursor-pointer"
+                        className="w-full"
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200">
-                      <div>
-                        <div className="flex justify-between text-[10px] font-mono">
-                          <span className="text-slate-600">Length L_f</span>
-                          <span className="font-bold text-slate-900">
-                            {hfParams.fibreLengthM.toFixed(2)} m
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          aria-label="Fibre Effective Length (m)"
-                          min={0.2}
-                          max={0.55}
-                          step={0.02}
-                          value={hfParams.fibreLengthM}
-                          onChange={(e) =>
-                            onUpdateHfParams({
-                              ...hfParams,
-                              fibreLengthM: Number(e.target.value),
-                            })
-                          }
-                          className="w-full accent-indigo-600 cursor-pointer"
-                        />
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-[10px] font-mono">
-                          <span className="text-slate-600">Fibres/Cart</span>
-                          <span className="font-bold text-slate-900">
-                            {hfParams.numberOfFibres.toLocaleString()}
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          aria-label="Number of Fibres per Cartridge"
-                          min={8000}
-                          max={22000}
-                          step={500}
-                          value={hfParams.numberOfFibres}
-                          onChange={(e) =>
-                            onUpdateHfParams({
-                              ...hfParams,
-                              numberOfFibres: Number(e.target.value),
-                            })
-                          }
-                          className="w-full accent-indigo-600 cursor-pointer"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Live 4-Card Filter Hydraulics Diagnostic Readout */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs font-mono">
-                  <div
-                    className={`p-2.5 border ${
-                      physicsResult.isHfWallShearViolated
-                        ? 'bg-rose-50 border-rose-300 text-rose-950'
-                        : 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                    }`}
-                  >
-                    <div className="text-[10px] uppercase font-bold opacity-75">
-                      Lumen Wall Shear (τ_w,HF ≤ 2.50 Pa)
-                    </div>
-                    <div className="text-sm font-bold mt-0.5">
-                      {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} Pa (
-                      {physicsResult.hfWallShearLoadPct.toFixed(0)}% ·{' '}
-                      {physicsResult.isHfWallShearViolated ? 'FAIL' : 'PASS'})
-                    </div>
-                    <div className="text-[10px] mt-0.5 opacity-90">
-                      {(hfParams.retentionMode ?? 'atf_alternating') === 'atf_alternating'
-                        ? `Cycle-mean: ${physicsResult.hfCycleMeanWallShearPa.toFixed(2)} Pa · ATF peak: ${physicsResult.hfPeakOscillatoryWallShearPa.toFixed(2)} Pa`
-                        : `Steady lumen: ${physicsResult.hfCycleMeanWallShearPa.toFixed(2)} Pa + Pump: ${physicsResult.hfPumpHeadShearEquivalentPa.toFixed(2)} Pa`}
-                    </div>
-                  </div>
-
-                  <div
-                    className={`p-2.5 border ${
-                      physicsResult.isHfPressureDropViolated
-                        ? 'bg-rose-50 border-rose-300 text-rose-950'
-                        : 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                    }`}
-                  >
-                    <div className="text-[10px] uppercase font-bold opacity-75">
-                      Axial Pressure Drop (ΔP_HF ≤ 35 kPa)
-                    </div>
-                    <div className="text-sm font-bold mt-0.5">
-                      {physicsResult.hfPressureDropKpa.toFixed(1)} kPa (
-                      {physicsResult.hfPressureDropLoadPct.toFixed(0)}% ·{' '}
-                      {physicsResult.isHfPressureDropViolated ? 'FAIL' : 'PASS'})
-                    </div>
-                    <div className="text-[10px] mt-0.5 opacity-90">
-                      Lumen velocity v = {physicsResult.hfLumenVelocityMPerS.toFixed(3)} m/s
-                    </div>
-                  </div>
-
-                  <div
-                    className={`p-2.5 border ${
-                      physicsResult.isHfFoulingVelocityTooLow
-                        ? 'bg-rose-50 border-rose-300 text-rose-950'
-                        : 'bg-slate-50 border-slate-200 text-slate-900'
-                    }`}
-                  >
-                    <div className="text-[10px] uppercase font-bold opacity-75">
-                      Membrane Area &amp; Anti-Fouling γ_w
-                    </div>
-                    <div className="text-sm font-bold mt-0.5">
-                      A_mem = {physicsResult.hfTotalMembraneAreaM2.toFixed(2)} m² ·{' '}
-                      {physicsResult.hfPermeateFluxLmh.toFixed(1)} LMH
-                    </div>
-                    <div className="text-[10px] mt-0.5">
-                      γ_w = {physicsResult.hfWallShearRatePerS} s⁻¹ (min{' '}
-                      {physicsResult.hfMinAntiFoulingShearRatePerS} s⁻¹:{' '}
-                      {physicsResult.isHfFoulingVelocityTooLow ? 'FOULING FAIL' : 'PASS'})
-                    </div>
-                  </div>
-
-                  <div
-                    className={`p-2.5 border ${
-                      physicsResult.hfAxialOxygenDepleted
-                        ? 'bg-rose-50 border-rose-300 text-rose-950'
-                        : 'bg-slate-50 border-slate-200 text-slate-900'
-                    }`}
-                  >
-                    <div className="text-[10px] uppercase font-bold opacity-75">
-                      Single-Pass Filter Outlet DO
-                    </div>
-                    <div className="text-sm font-bold mt-0.5">
-                      DO_out = {physicsResult.hfOutletDoPercent.toFixed(1)}% (
-                      {physicsResult.hfAxialOxygenDepleted ? 'FAIL < 20%' : 'PASS ≥ 20%'})
-                    </div>
-                    <div className="text-[10px] mt-0.5">
-                      {physicsResult.hfEffectiveTotalFibres.toLocaleString()} total fibres ({hfParams.parallelCartridgesCount ?? 1}× cart)
-                    </div>
-                  </div>
-                </div>
-
-                {/* Explicit ATF vs TFF Womersley Physical Approximation Notice */}
-                <div className="p-2.5 bg-indigo-50/70 border border-indigo-200 text-[11px] text-indigo-950 font-mono">
-                  <strong>Physical Formulation &amp; Approximation Disclosure:</strong>{' '}
-                  {physicsResult.hfApproximationDisclosure}
-                </div>
-
-                {/* Expandable 3 Ranked Filter Intervention Cards ("Suggest Filter Improvements") */}
-                {showFilterSuggestionsPanel && (
-                  <div className="border-t border-slate-200 pt-3 space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-xs font-mono font-bold uppercase text-indigo-950">
-                        AI-Calculated Cell-Retention Filter Interventions (Live Hagen–Poiseuille Model)
-                      </div>
+                    {/* Dropdown for Hollow-Fibre Filter Hydraulics Controls */}
+                    <div className="pt-2 border-t border-slate-200">
                       <button
                         type="button"
-                        onClick={() => onUpdateHfParams(DEFAULT_HF_PHYSICS)}
-                        className="px-2.5 py-1 text-[11px] font-mono border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 cursor-pointer"
+                        onClick={() => setShowFilterControlsDropdown((v) => !v)}
+                        className="w-full flex items-center justify-between py-1.5 font-semibold text-slate-800 hover:text-blue-700 cursor-pointer"
                       >
-                        Reset Filter to Baseline (280 μm · 6.5 L/min)
+                        <span>
+                          Cell-Retention Filter Hydraulics (
+                          {isFilterViolated ? 'FAIL: Wall Shear High' : 'PASS'})
+                        </span>
+                        {showFilterControlsDropdown ? (
+                          <ChevronUp className="w-4 h-4" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4" />
+                        )}
                       </button>
-                    </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                      {filterSuggestions.map((opt) => {
-                        const isApplied = lastAppliedFilterOptId === opt.id;
-                        return (
-                          <div
-                            key={opt.id}
-                            className={`border p-3 flex flex-col justify-between space-y-2.5 ${
-                              isApplied
-                                ? 'border-emerald-600 bg-emerald-50/40 ring-1 ring-emerald-600'
-                                : 'border-slate-300 bg-slate-50/60'
-                            }`}
-                          >
-                            <div className="space-y-1.5">
-                              <div className="flex items-center justify-between gap-1 text-[10px] font-mono">
-                                <span className="px-1.5 py-0.5 bg-indigo-600 text-white font-bold">
-                                  OPTION #{opt.rank}
-                                </span>
-                                <span className="px-1.5 py-0.5 bg-slate-200 text-slate-800 font-semibold">
-                                  {opt.strategyBadge}
-                                </span>
-                              </div>
-                              <h3 className="text-xs font-bold text-slate-900">
-                                {opt.title}
-                              </h3>
-                              <p className="text-[11px] text-slate-600 leading-relaxed">
-                                {opt.summaryRationale}
-                              </p>
-
-                              <div className="p-2 bg-white border border-slate-200 text-[10px] font-mono space-y-0.5">
-                                <div className="font-bold text-slate-800">
-                                  Recalculated Filter Metrics:
-                                </div>
-                                <div className="text-emerald-800 font-bold">
-                                  • τ_w,eff: {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} →{' '}
-                                  {opt.evalPhysics.hfEffectiveWallShearStressPa.toFixed(2)} Pa (
-                                  {opt.evalPhysics.hfWallShearLoadPct.toFixed(0)}% of 2.50 Pa)
-                                </div>
-                                <div className="text-emerald-800 font-bold">
-                                  • ΔP_HF: {physicsResult.hfPressureDropKpa.toFixed(1)} →{' '}
-                                  {opt.evalPhysics.hfPressureDropKpa.toFixed(1)} kPa (
-                                  {opt.evalPhysics.hfPressureDropLoadPct.toFixed(0)}% of 35 kPa)
-                                </div>
-                                <div className="text-slate-700">
-                                  • Crossflow γ_w: {opt.evalPhysics.hfWallShearRatePerS} s⁻¹ · DO_out:{' '}
-                                  {opt.evalPhysics.hfOutletDoPercent.toFixed(1)}% · A_mem:{' '}
-                                  {opt.evalPhysics.hfTotalMembraneAreaM2.toFixed(2)} m²
-                                </div>
-                              </div>
-
-                              <div className="text-[10px] text-slate-700 space-y-0.5">
-                                <div className="font-mono font-bold text-slate-800">
-                                  Settings Changed:
-                                </div>
-                                {opt.parameterChangesFromCurrent.map((chg, i) => (
-                                  <div key={i} className="font-mono">
-                                    • {chg}
-                                  </div>
-                                ))}
-                              </div>
-
-                              <div className="text-[10px] text-amber-900 bg-amber-50/80 border border-amber-200 p-1.5 space-y-0.5">
-                                <div className="font-mono font-bold">
-                                  Engineering Trade-Offs &amp; Limits:
-                                </div>
-                                {opt.tradeOffsAndLimitations.map((tr, i) => (
-                                  <div key={i}>• {tr}</div>
-                                ))}
-                              </div>
+                      {showFilterControlsDropdown && (
+                        <div className="mt-2 p-3 bg-white border border-slate-200 space-y-2.5">
+                          <p className="text-[11px] text-slate-600">
+                            Hollow-fibre filter wall shear depends on recirculation flow, lumen
+                            diameter, and parallel cartridge count — not reactor RPM.
+                          </p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-medium text-slate-700">
+                                Parallel Cartridges
+                              </label>
+                              <select
+                                value={hfParams.parallelCartridgesCount ?? 1}
+                                onChange={(e) =>
+                                  onUpdateHfParams({
+                                    ...hfParams,
+                                    parallelCartridgesCount: Number(e.target.value) as 1 | 2 | 3,
+                                  })
+                                }
+                                className="w-full px-2 py-1 bg-slate-50 border border-slate-300 font-mono"
+                              >
+                                <option value={1}>1 Cartridge</option>
+                                <option value={2}>2 Cartridges (Halves Flow)</option>
+                                <option value={3}>3 Cartridges</option>
+                              </select>
                             </div>
-
+                            <div>
+                              <label className="block text-[11px] font-medium text-slate-700">
+                                Lumen Inner Diameter
+                              </label>
+                              <select
+                                value={hfParams.fibreInnerDiameterUm}
+                                onChange={(e) =>
+                                  onUpdateHfParams({
+                                    ...hfParams,
+                                    fibreInnerDiameterUm: Number(e.target.value),
+                                  })
+                                }
+                                className="w-full px-2 py-1 bg-slate-50 border border-slate-300 font-mono"
+                              >
+                                <option value={500}>500 μm (0.5 mm Standard)</option>
+                                <option value={750}>750 μm (0.75 mm Wide)</option>
+                                <option value={1000}>1000 μm (1.0 mm Low-Shear)</option>
+                              </select>
+                            </div>
+                          </div>
+                          {filterSuggestions[0] && (
                             <button
                               type="button"
-                              onClick={() => {
-                                onUpdateHfParams(opt.proposedHfParams);
-                                setLastAppliedFilterOptId(opt.id);
-                              }}
-                              className={`w-full py-1.5 px-2.5 text-xs font-mono font-bold cursor-pointer ${
-                                isApplied
-                                  ? 'bg-emerald-700 text-white'
-                                  : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                              }`}
+                              onClick={() =>
+                                onUpdateHfParams(filterSuggestions[0].proposedHfParams)
+                              }
+                              className="w-full py-1.5 px-2.5 text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-800 cursor-pointer"
                             >
-                              {isApplied
-                                ? '✓ Applied Filter Settings to Simulation'
-                                : 'Apply Filter Settings to Simulation'}
+                              Apply Recommended Filter Fix ({filterSuggestions[0].title})
                             </button>
-                          </div>
-                        );
-                      })}
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                )}
-              </div>
-            )}
-          </div>
 
-          {/* Expandable "Show Scientific Reasoning" Drawer */}
-          <div className="border border-slate-200 bg-slate-50">
-            <button
-              type="button"
-              onClick={() => setShowStep2Reasoning((v) => !v)}
-              className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-mono font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
-            >
-              <span className="flex items-center gap-2">
-                <BookOpen className="w-3.5 h-3.5 text-blue-600" />
-                Show Scientific Reasoning — First-Principles Mass Balance, Van&apos;t Riet k_La &amp; Kolmogorov Shear Equations
-              </span>
-              {showStep2Reasoning ? (
-                <ChevronUp className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
-            {showStep2Reasoning && (
-              <div className="p-4 border-t border-slate-200 bg-white grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs text-slate-700 font-mono">
-                <div className="p-3 bg-slate-50 border border-slate-200 space-y-1">
-                  <div className="font-bold text-slate-900">1. Oxygen Balance</div>
-                  <div>OUR = q_O2 × X_v</div>
-                  <div>OTR = k_La × (C*_O2(y_O2) − C_L)</div>
-                  <div className="text-[11px] font-sans text-slate-600 pt-1">
-                    At 43.5×10⁶ cells/mL and q_O2 = {groundedParams.qO2Specific} pmol/cell/h, OUR = {physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h.
-                  </div>
-                </div>
-                <div className="p-3 bg-slate-50 border border-slate-200 space-y-1">
-                  <div className="font-bold text-slate-900">2. Multi-Impeller Power &amp; k_La</div>
-                  <div>P_0 = n × N_p0 × ρ × N³ × D_i⁵</div>
-                  <div>k_La = α_sparger × 0.026 × (P_g/V)^0.4 × v_s^0.5</div>
-                  <div className="text-[11px] font-sans text-slate-600 pt-1">
-                    Van&apos;t Riet (1979) correlation; 15 μm microsparger increases interfacial area α by 3.4×.
-                  </div>
-                </div>
-                <div className="p-3 bg-slate-50 border border-slate-200 space-y-1">
-                  <div className="font-bold text-slate-900">3. Kolmogorov Shear &amp; Mixing</div>
-                  <div>λ_K = (ν³ / ε_max)^(1/4) &gt; 18 μm</div>
-                  <div>θ_95% ∝ N⁻¹ × (D_i/D_T)^(-2.3) × (Z/D_T)^1.5</div>
-                  <div className="text-[11px] font-sans text-slate-600 pt-1">
-                    Widening D_i/D_T reduces mixing time rapidly (exponent −2.3) without excessive tip speed.
-                  </div>
-                </div>
-                <div className="p-3 bg-slate-50 border border-slate-200 space-y-1">
-                  <div className="font-bold text-slate-900">4. Hollow-Fibre Hydraulics</div>
-                  <div>ΔP_HF = (128 μ L_f Q_f) / (π d_f⁴)</div>
-                  <div>τ_w = (32 μ Q_f) / (π d_f³)</div>
-                  <div className="text-[11px] font-sans text-slate-600 pt-1">
-                    Hagen–Poiseuille lumen flow: widening fibre ID d_f reduces ΔP by the 4th power.
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveStage('optimise')}
+                    className="w-full py-2 px-3 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Open AI Multi-Objective Optimiser (4. Optimise)</span>
+                  </button>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* CASE C: MICROBIAL FERMENTATION OR UNSUPPORTED MODALITY (HONEST ABSTENTION) */}
+          {(effectiveModality === 'microbial_fermentation' ||
+            effectiveModality === 'insufficient_evidence_abstain') && (
+            <div className="p-5 bg-amber-50/70 border border-amber-300 space-y-3 text-xs text-amber-950">
+              <div className="font-bold text-sm flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>
+                  Scientific Abstention Gate Active — Quantitative Bioreactor Model Not Yet
+                  Calibrated for This Candidate
+                </span>
+              </div>
+              <p className="leading-relaxed">
+                {effectiveModality === 'microbial_fermentation'
+                  ? `For ${selectedCandidateCard.name}, microbial fermentation (E. coli or K. phaffii) is biologically appropriate for initial expression screening. However, because no wet-lab specific productivity (q_p) or oxygen uptake (q_O2) data have been measured yet, bioREACT refuses to fabricate bioreactor curves or borrow CHO antibody parameters.`
+                  : 'Insufficient structural or kinetic evidence is available to run a validated quantitative manufacturing model. bioREACT abstains from generating fabricated cost or process predictions.'}
+              </p>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveStage('next_experiments')}
+                  className="px-3.5 py-1.5 font-semibold bg-amber-800 text-white hover:bg-amber-900 cursor-pointer"
+                >
+                  View Required Wet-Lab Characterization Experiments →
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* =====================================================================
-          STEP 3 — ASK bioREACT WHAT TO TEST NEXT
+          STAGE 4: OPTIMISE — ROUTE-APPROPRIATE OPTIMISATION & TRADE-OFFS
          ===================================================================== */}
-      {activeStep === 3 && (
-        <div className="bg-white border border-slate-300 shadow-xs p-5 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+      {activeStage === 'optimise' && (
+        <div className="bg-white border border-slate-200 p-6 shadow-xs space-y-5">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-4">
             <div>
-              <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-blue-700">
-                STEP 3 OF 4 · MULTI-OBJECTIVE EXPERIMENT GENERATOR
+              <div className="text-xs font-mono font-bold uppercase text-blue-700">
+                4. Optimise · {selectedCandidateCard.modalityLabel}
               </div>
-              <h1 className="text-lg font-bold text-slate-900">
-                Step 3 — Ask bioREACT What to Test Next
-              </h1>
-              <p className="text-xs text-slate-600 mt-0.5 max-w-3xl">
-                Instead of adjusting one variable at a time, <strong>bioREACT</strong> evaluates discrete equipment choices and continuous operating settings together to propose up to three feasible configurations to test next.
-              </p>
+              <h2 className="text-lg font-bold text-slate-950 mt-0.5">
+                {effectiveModality === 'chemical_synthesis'
+                  ? `Closed-Loop Molecular Redesign: How ${selectedCandidateCard.name.split('(')[0].trim()} Was Optimised for Synthesis`
+                  : `Multi-Objective 500 L Bioreactor Optimisation (${candidate.genericName})`}
+              </h2>
             </div>
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => setRecalcCount((c) => c + 1)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-mono font-bold bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer shadow-xs"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                Find Next Experiments (Live Run #{recalcCount})
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveStep(4)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-mono font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
-              >
-                Step 4: Review the Decision
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setActiveStage('next_experiments')}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer shrink-0"
+            >
+              <span>Proceed to 5. Next Experiments</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
           </div>
 
-          {/* Interactive Judge Control Bar: Priority Selection + Live Parameter Challenge */}
-          <div className="bg-slate-50 border border-slate-200 p-3.5 space-y-3">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2">
-              <div className="text-xs font-bold text-slate-900 font-mono uppercase flex items-center gap-1.5">
-                <Sliders className="w-3.5 h-3.5 text-indigo-600" />
-                1. Choose Optimisation Priority (or Let a Judge Change Inputs &amp; Rerun Live)
-              </div>
-              <span className="text-[11px] font-mono text-emerald-800 bg-emerald-50 border border-emerald-300 px-2 py-0.5">
-                Evaluated {unifiedSuite.evaluatedTotalConfigurationsCount} equipment × operating combinations ({unifiedSuite.feasibleConfigurationsCount} passed all hard safety limits)
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-1.5">
-              {(
-                Object.keys(
-                  DEMO_OBJECTIVE_PRESETS
-                ) as ReactorOptimisationObjectivePresetId[]
-              ).map((presetKey) => {
-                const p = DEMO_OBJECTIVE_PRESETS[presetKey];
-                const isSelected = activePresetId === presetKey;
-                return (
-                  <button
-                    key={presetKey}
-                    type="button"
-                    onClick={() => {
-                      setActivePresetId(presetKey);
-                      setRecalcCount((c) => c + 1);
-                    }}
-                    className={`text-left p-2 border transition-colors cursor-pointer ${
-                      isSelected
-                        ? 'border-indigo-600 bg-indigo-50/80 ring-1 ring-indigo-600'
-                        : 'border-slate-300 bg-white hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="text-xs font-bold text-slate-900">{p.label}</div>
-                    <div className="text-[10px] text-slate-600 mt-0.5 line-clamp-2">
-                      {p.plainDesc}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Judge Interactive Input Row — Change any supported input and immediately see live model recalculation */}
-            <div className="pt-2 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 items-end">
-              <div>
-                <label className="block text-[10px] font-mono font-bold text-slate-700 mb-1">
-                  JUDGE INPUT: TARGET CELL DENSITY
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    aria-label="Judge Target Cell Density"
-                    min={20}
-                    max={65}
-                    step={1.5}
-                    value={strParams.targetVcdE6PerMl}
-                    onChange={(e) => {
-                      onUpdateStrParams({
-                        ...strParams,
-                        targetVcdE6PerMl: Number(e.target.value),
-                      });
-                      setRecalcCount((c) => c + 1);
-                    }}
-                    className="w-full accent-indigo-600 cursor-pointer"
-                  />
-                  <span className="text-xs font-mono font-bold text-slate-900 shrink-0">
-                    {strParams.targetVcdE6PerMl.toFixed(1)}M/mL
-                  </span>
+          {effectiveModality === 'chemical_synthesis' ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+              <div className="p-4 bg-slate-50 border border-slate-200 space-y-2">
+                <div className="font-mono font-bold text-slate-500">
+                  ROUND 0 · STARTING POINT
                 </div>
+                <div className="text-sm font-bold text-slate-950">
+                  Known Binder: {intakeState.knownBinderName.split('(')[0].trim()}
+                </div>
+                <p className="text-slate-600">
+                  Reference pocket score:{' '}
+                  <strong className="font-mono">
+                    {intakeState.knownBinderAffinityKcalMol.toFixed(2)} kcal/mol
+                  </strong>
+                  . Used to define the 3D binding box on {intakeState.targetProteinSymbol}.
+                </p>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-mono font-bold text-slate-700 mb-1">
-                  JUDGE INPUT: IMPELLER RATIO (D_i/D_T)
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    aria-label="Judge Impeller Diameter Ratio"
-                    min={0.32}
-                    max={0.48}
-                    step={0.02}
-                    value={strParams.diameterRatioDiDt}
-                    onChange={(e) => {
-                      onUpdateStrParams({
-                        ...strParams,
-                        diameterRatioDiDt: Number(e.target.value),
-                      });
-                      setRecalcCount((c) => c + 1);
-                    }}
-                    className="w-full accent-indigo-600 cursor-pointer"
-                  />
-                  <span className="text-xs font-mono font-bold text-slate-900 shrink-0">
-                    {strParams.diameterRatioDiDt.toFixed(2)}
-                  </span>
+              <div className="p-4 bg-rose-50/50 border border-rose-200 space-y-2">
+                <div className="font-mono font-bold text-rose-700">
+                  ROUND 1 · UNCONSTRAINED DOCKING TRAP
                 </div>
+                <div className="text-sm font-bold text-slate-950">
+                  Raw Hit R1-C01 (−12.90 kcal/mol)
+                </div>
+                <p className="text-slate-700">
+                  Strongest raw docking score, but chemistry critics flag <strong>7 chiral centres</strong>,
+                  SA score 6.42, and 12–18 steps. Automatically rejected so researchers don’t waste
+                  months on an unbuildable molecule.
+                </p>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-mono font-bold text-slate-700 mb-1">
-                  JUDGE INPUT: AGITATION RPM
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    aria-label="Judge Agitation Speed RPM"
-                    min={65}
-                    max={200}
-                    step={5}
-                    value={strParams.stirrerSpeedRpm}
-                    onChange={(e) => {
-                      onUpdateStrParams({
-                        ...strParams,
-                        stirrerSpeedRpm: Number(e.target.value),
-                      });
-                      setRecalcCount((c) => c + 1);
-                    }}
-                    className="w-full accent-indigo-600 cursor-pointer"
-                  />
-                  <span className="text-xs font-mono font-bold text-slate-900 shrink-0">
-                    {strParams.stirrerSpeedRpm} RPM
-                  </span>
+              <div className="p-4 bg-emerald-50/50 border border-emerald-300 space-y-2">
+                <div className="font-mono font-bold text-emerald-800">
+                  ROUND 2 · CRITIC-GUIDED PRACTICAL LEAD
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-mono font-bold text-slate-700 mb-1">
-                  JUDGE INPUT: INLET OXYGEN %
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    aria-label="Judge Inlet Oxygen Percentage"
-                    min={21}
-                    max={60}
-                    step={1}
-                    value={Math.round(strParams.oxygenEnrichmentFraction * 100)}
-                    onChange={(e) => {
-                      onUpdateStrParams({
-                        ...strParams,
-                        oxygenEnrichmentFraction: Number(e.target.value) / 100,
-                      });
-                      setRecalcCount((c) => c + 1);
-                    }}
-                    className="w-full accent-indigo-600 cursor-pointer"
-                  />
-                  <span className="text-xs font-mono font-bold text-slate-900 shrink-0">
-                    {(strParams.oxygenEnrichmentFraction * 100).toFixed(0)}%
-                  </span>
+                <div className="text-sm font-bold text-slate-950">
+                  {selectedCandidateCard.name}
                 </div>
-              </div>
-
-              <div className="bg-white border border-slate-300 px-2.5 py-1.5 text-[11px] font-mono">
-                <div className="text-slate-500">Current Manual State:</div>
-                <div
-                  className={`font-bold ${
-                    isAllPhysicsFeasible ? 'text-emerald-700' : 'text-rose-700'
-                  }`}
-                >
-                  {isAllPhysicsFeasible
-                    ? `FEASIBLE (t_m=${physicsResult.mixingTimeGassedS.toFixed(0)}s, ΔP=${physicsResult.hfPressureDropKpa.toFixed(1)}kPa)`
-                    : isO2Starved
-                    ? 'INFEASIBLE: OTR < OUR'
-                    : 'INFEASIBLE: Shear/Mixing Limit'}
-                </div>
+                <p className="text-slate-700">
+                  Replaces the chiral glycoside with an achiral biphenyl sulfonamide: retains strong
+                  predicted pocket fit (<strong>−10.82 kcal/mol</strong>) while cutting synthesis to{' '}
+                  <strong>3 steps and 0 chiral centres</strong>.
+                </p>
               </div>
             </div>
-          </div>
-
-          {/* 3 Calculated Candidate Operating Configurations */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {unifiedSuite.rankedConfigurations.map((cfg) => {
-              const isApplied = lastAppliedConfigId === cfg.id;
-              return (
-                <div
-                  key={cfg.id}
-                  className={`border p-4 flex flex-col justify-between space-y-3 transition-all ${
-                    isApplied
-                      ? 'border-emerald-600 bg-emerald-50/40 ring-1 ring-emerald-600'
-                      : cfg.rank === 1
-                      ? 'border-blue-600 bg-blue-50/25'
-                      : 'border-slate-300 bg-white'
-                  }`}
-                >
-                  <div className="space-y-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase bg-slate-900 text-white">
-                          RANK #{cfg.rank} CANDIDATE · SCORE {cfg.compositeObjectiveScore.toFixed(1)}/100
-                        </span>
-                        <h2 className="text-sm font-bold text-slate-900 mt-1">
-                          {cfg.title}
-                        </h2>
-                      </div>
-                      <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 shrink-0">
-                        All Limits Pass
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-slate-700 leading-relaxed">
-                      {cfg.summaryRationale}
-                    </p>
-
-                    {/* Proposed Hardware & Operating Changes */}
-                    <div className="bg-slate-50 border border-slate-200 p-2.5 text-[11px] font-mono space-y-1">
-                      <div className="font-bold text-slate-900 uppercase">
-                        Proposed Operating Settings:
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-slate-700">
-                        <div>
-                          • Sparger:{' '}
-                          <strong>
-                            {cfg.strParams.spargerType === 'sintered_microsparger'
-                              ? '15 μm Micro'
-                              : 'Open-Pipe'}
-                          </strong>
-                        </div>
-                        <div>
-                          • Impeller:{' '}
-                          <strong>
-                            {cfg.strParams.impellerCount}×{' '}
-                            {
-                              IMPELLER_GEOMETRY_SPECS[cfg.strParams.impellerType]
-                                .shortLabel
-                            }
-                          </strong>
-                        </div>
-                        <div>
-                          • Speed &amp; D/T:{' '}
-                          <strong>
-                            {cfg.strParams.stirrerSpeedRpm} RPM · D/T=
-                            {cfg.strParams.diameterRatioDiDt.toFixed(2)}
-                          </strong>
-                        </div>
-                        <div>
-                          • Gas &amp; O₂:{' '}
-                          <strong>
-                            {cfg.strParams.spargeRateVvm} vvm ·{' '}
-                            {(cfg.strParams.oxygenEnrichmentFraction * 100).toFixed(0)}% O₂
-                          </strong>
-                        </div>
-                        <div className="col-span-2">
-                          • Filter Cartridge:{' '}
-                          <strong>
-                            d_f = {cfg.hfParams.fibreInnerDiameterUm} μm, L ={' '}
-                            {cfg.hfParams.fibreLengthM.toFixed(2)} m (
-                            {cfg.hfParams.numberOfFibres.toLocaleString()} fibres)
-                          </strong>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Recalculated Physics Outcomes */}
-                    <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
-                      <div className="p-2 bg-white border border-slate-200">
-                        <div className="text-slate-500">Oxygen (OTR vs OUR)</div>
-                        <div className="font-bold text-emerald-700">
-                          {cfg.evalPhysics.otrMmolPerLHour.toFixed(1)} vs{' '}
-                          {cfg.evalPhysics.ourMmolPerLHour.toFixed(1)} mmol/L/h
-                        </div>
-                      </div>
-                      <div className="p-2 bg-white border border-slate-200">
-                        <div className="text-slate-500">Gassed Mixing Time</div>
-                        <div className="font-bold text-blue-700">
-                          t_m = {cfg.evalPhysics.mixingTimeGassedS.toFixed(1)} s (≤ 60 s)
-                        </div>
-                      </div>
-                      <div className="p-2 bg-white border border-slate-200">
-                        <div className="text-slate-500">Impeller Shear &amp; λ_K</div>
-                        <div className="font-bold text-slate-900">
-                          {cfg.evalPhysics.estimatedShearStressPa.toFixed(2)} Pa ·{' '}
-                          {cfg.evalPhysics.kolmogorovScaleUm.toFixed(0)} μm
-                        </div>
-                      </div>
-                      <div className="p-2 bg-white border border-slate-200">
-                        <div className="text-slate-500">Filter ΔP &amp; Cost</div>
-                        <div className="font-bold text-slate-900">
-                          {cfg.evalPhysics.hfPressureDropKpa.toFixed(1)} kPa · $
-                          {cfg.evalCogs.cogsPerGramUsd.toFixed(0)}/g
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="text-[11px] text-slate-600 bg-amber-50/70 border border-amber-200 p-2">
-                      <strong>Predicted Trade-off:</strong>{' '}
-                      {cfg.competingObjectiveTradeOffs[0] ||
-                        'Balances mixing speed, filter pressure drop, and oxygen transfer margin.'}
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-200 flex flex-col gap-1.5">
+          ) : (
+            <div className="space-y-4">
+              {/* Objective Selector Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                {(
+                  Object.keys(
+                    DEMO_OBJECTIVE_PRESETS
+                  ) as ReactorOptimisationObjectivePresetId[]
+                ).map((presetKey) => {
+                  const p = DEMO_OBJECTIVE_PRESETS[presetKey];
+                  const isSelected = activePresetId === presetKey;
+                  return (
                     <button
+                      key={presetKey}
                       type="button"
-                      onClick={() => handleApplyProposedConfig(cfg)}
-                      className={`w-full py-2 px-3 text-xs font-mono font-bold cursor-pointer transition-colors ${
-                        isApplied
-                          ? 'bg-emerald-700 text-white'
-                          : 'bg-slate-900 text-white hover:bg-blue-600'
+                      onClick={() => setActivePresetId(presetKey)}
+                      className={`px-3 py-1.5 text-xs font-medium border cursor-pointer ${
+                        isSelected
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
                       }`}
                     >
-                      {isApplied
-                        ? '✓ Applied to Live Bioreactor Model'
-                        : 'Apply Configuration to Live Bioreactor'}
+                      {p.label}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleApplyProposedConfig(cfg);
-                        onRunNextExperiment('Constrained BO (EI × P_feas)', {
-                          x1_vvd: groundedParams.optimalVvd,
-                          x2_do: groundedParams.optimalDoPercent,
-                          tempC: 33.5,
-                        });
-                        setActiveStep(4);
-                      }}
-                      className="w-full py-1.5 px-3 text-[11px] font-mono font-semibold border border-blue-300 bg-blue-50 text-blue-900 hover:bg-blue-100 cursor-pointer"
-                    >
-                      Apply &amp; Proceed to Step 4 Decision Review →
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Expandable Scientific Details */}
-          <div className="border border-slate-200 bg-slate-50">
-            <button
-              type="button"
-              onClick={() => setShowStep3Details((v) => !v)}
-              className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-mono font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
-            >
-              <span className="flex items-center gap-2">
-                <BookOpen className="w-3.5 h-3.5 text-blue-600" />
-                Scientific Details — Constrained Bayesian Optimisation Benchmark &amp; Mixing/Filter Levers
-              </span>
-              {showStep3Details ? (
-                <ChevronUp className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
-            {showStep3Details && (
-              <div className="p-4 border-t border-slate-200 bg-white space-y-3 text-xs text-slate-700">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="p-3 bg-slate-50 border border-slate-200">
-                    <div className="font-mono font-bold text-slate-900 mb-1">
-                      1. Why Mixing &amp; Filter ΔP Improve Together
-                    </div>
-                    <p>
-                      Increasing impeller diameter ratio (D_i/D_T = 0.38 → 0.44) reduces gassed mixing time via θ_95% ∝ (D_i/D_T)^(-2.30) without high tip shear, while switching hollow-fibre lumen ID from 280 μm to 360 μm cuts ΔP_HF by (280/360)⁴ ≈ 63%.
-                    </p>
-                  </div>
-                  <div className="p-3 bg-slate-50 border border-slate-200">
-                    <div className="font-mono font-bold text-slate-900 mb-1">
-                      2. Reproducible 8-Seed BO vs Random Benchmark
-                    </div>
-                    <p>
-                      Across {liveEightSeedSummary.seedCount} deterministic seeds ({liveEightSeedSummary.budget} evaluations/seed), Constrained BO (EI × P_feas) achieves{' '}
-                      <strong>
-                        {liveEightSeedSummary.constrainedBoStats.finalScoreMean.toFixed(1)} ±{' '}
-                        {liveEightSeedSummary.constrainedBoStats.finalScoreStd.toFixed(1)}
-                      </strong>{' '}
-                      vs Random Search{' '}
-                      <strong>
-                        {liveEightSeedSummary.randomSearchStats.finalScoreMean.toFixed(1)} ±{' '}
-                        {liveEightSeedSummary.randomSearchStats.finalScoreStd.toFixed(1)}
-                      </strong>{' '}
-                      synthetic objective units (wins {liveEightSeedSummary.constrainedBoStats.seedsWonCount}/
-                      {liveEightSeedSummary.seedCount} seeds).
-                    </p>
-                  </div>
-                  <div className="p-3 bg-slate-50 border border-slate-200">
-                    <div className="font-mono font-bold text-slate-900 mb-1">
-                      3. Unsupported Model Effects (Explicitly Flagged)
-                    </div>
-                    <p>
-                      Fine-tuning inter-impeller spacing (ΔC/D_i) or hybrid dissimilar impellers requires 3D CFD/PIV or dual-probe conductivity tracer calibration; <strong>bioREACT</strong> abstains from inventing uncalibrated spacing optima.
-                    </p>
-                  </div>
-                </div>
+                  );
+                })}
               </div>
-            )}
-          </div>
+
+              {/* Top 3 Ranked Multi-Objective Reactor Configurations */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {unifiedSuite.rankedConfigurations.map((cfg) => {
+                  const isApplied = lastAppliedConfigId === cfg.id;
+                  return (
+                    <div
+                      key={cfg.id}
+                      className={`p-4 border flex flex-col justify-between space-y-3 text-xs ${
+                        isApplied
+                          ? 'border-emerald-600 bg-emerald-50/40'
+                          : 'border-slate-200 bg-slate-50/60'
+                      }`}
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between font-mono">
+                          <span className="font-bold text-blue-900">
+                            OPTION #{cfg.rank} · Score {cfg.compositeObjectiveScore.toFixed(1)}/100
+                          </span>
+                          <span className="text-emerald-700 font-semibold">
+                            All 4 Constraints PASS
+                          </span>
+                        </div>
+                        <div className="text-sm font-bold text-slate-950">{cfg.title}</div>
+                        <p className="text-slate-600">{cfg.summaryRationale}</p>
+                        <div className="p-2.5 bg-white border border-slate-200 font-mono text-[11px] space-y-1">
+                          <div>
+                            OTR: <strong>{cfg.evalPhysics.otrMmolPerLHour.toFixed(1)}</strong> vs
+                            OUR: <strong>{cfg.evalPhysics.ourMmolPerLHour.toFixed(1)}</strong>{' '}
+                            mmol/L/h
+                          </div>
+                          <div>
+                            Mixing: <strong>{cfg.evalPhysics.mixingTimeGassedS.toFixed(1)} s</strong>{' '}
+                            · Impeller Shear:{' '}
+                            <strong>{cfg.evalPhysics.estimatedShearStressPa.toFixed(2)} Pa</strong>
+                          </div>
+                          <div>
+                            Filter ΔP:{' '}
+                            <strong>{cfg.evalPhysics.hfPressureDropKpa.toFixed(1)} kPa</strong> ·
+                            Wall Shear:{' '}
+                            <strong>
+                              {cfg.evalPhysics.hfEffectiveWallShearStressPa.toFixed(2)} Pa
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleApplyProposedConfig(cfg)}
+                        className={`w-full py-2 px-3 font-semibold cursor-pointer ${
+                          isApplied
+                            ? 'bg-emerald-700 text-white'
+                            : 'bg-blue-600 text-white hover:bg-blue-700'
+                        }`}
+                      >
+                        {isApplied ? '✓ Applied to 500 L Simulation' : 'Apply Configuration'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* =====================================================================
-          STEP 4 — REVIEW THE DECISION
+          STAGE 5: NEXT EXPERIMENTS — EVIDENCE-AWARE PLAN & HUMAN SIGN-OFF
          ===================================================================== */}
-      {activeStep === 4 && (
-        <div className="bg-white border border-slate-300 shadow-xs p-5 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+      {activeStage === 'next_experiments' && (
+        <div className="bg-white border border-slate-200 p-6 shadow-xs space-y-5">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-4">
             <div>
-              <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-blue-700">
-                STEP 4 OF 4 · BEFORE/AFTER REVIEW, UNCERTAINTY &amp; HUMAN APPROVAL GATE
+              <div className="text-xs font-mono font-bold uppercase text-blue-700">
+                5. Next Experiments · Evidence-Aware Validation &amp; Human Review
               </div>
-              <h1 className="text-lg font-bold text-slate-900">
-                Step 4 — Review the Decision
-              </h1>
-              <p className="text-xs text-slate-600 mt-0.5 max-w-3xl">
-                Verify the before/after engineering feasibility, inspect remaining scientific uncertainties and literature evidence, and record mandatory human sign-off before any experimental execution.
+              <h2 className="text-lg font-bold text-slate-950 mt-0.5">
+                Recommended Next Validation Steps for {selectedCandidateCard.name}
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 mt-0.5 max-w-3xl">
+                Review the missing experimental evidence, recommended wet-lab experiments, and human
+                safety sign-off status.
               </p>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => onSwitchToWorkbenchSection('brief')}
-                className="px-3 py-1.5 text-xs font-mono font-semibold border border-slate-300 bg-slate-100 text-slate-800 hover:bg-slate-200 cursor-pointer"
-              >
-                Open Full CMC Dossier &amp; Export →
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => onSwitchToWorkbenchSection('home_workbench')}
+              className="px-3.5 py-2 text-xs font-semibold bg-slate-900 text-white hover:bg-blue-700 cursor-pointer shrink-0"
+            >
+              Open Full Research Workbench →
+            </button>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-            {/* Left 7 Cols: Before/After Feasibility Table + Remaining Uncertainty */}
-            <div className="lg:col-span-7 space-y-3 flex flex-col justify-between">
-              <div className="border border-slate-200 overflow-hidden">
-                <div className="bg-slate-900 text-white px-3.5 py-2 text-xs font-mono font-bold uppercase flex items-center justify-between">
-                  <span>Before vs. After 500 L Engineering Feasibility Comparison</span>
-                  <span
-                    className={`px-2 py-0.5 text-[10px] ${
-                      isAllPhysicsFeasible
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
-                        : 'bg-rose-500/20 text-rose-300 border border-rose-400/40'
-                    }`}
-                  >
-                    {isAllPhysicsFeasible ? 'ACTIVE CONFIG FEASIBLE' : 'ACTIVE CONFIG INFEASIBLE'}
-                  </span>
-                </div>
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-100 border-b border-slate-200 font-mono text-[11px] text-slate-700">
-                      <th className="py-2 px-3">Engineering Metric</th>
-                      <th className="py-2 px-3">Initial 500 L Air Baseline</th>
-                      <th className="py-2 px-3">Active Live Configuration</th>
-                      <th className="py-2 px-3">Safety Limit &amp; Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 font-mono text-[11px]">
-                    <tr>
-                      <td className="py-2 px-3 font-sans font-semibold text-slate-900">
-                        Oxygen Supply (OTR vs OUR)
-                      </td>
-                      <td className="py-2 px-3 text-rose-700 font-bold">
-                        {baselinePhysics.otrMmolPerLHour.toFixed(1)} vs{' '}
-                        {baselinePhysics.ourMmolPerLHour.toFixed(1)} mmol/L/h (FAIL)
-                      </td>
-                      <td
-                        className={`py-2 px-3 font-bold ${
-                          isO2Starved ? 'text-rose-700' : 'text-emerald-700'
-                        }`}
-                      >
-                        {physicsResult.otrMmolPerLHour.toFixed(1)} vs{' '}
-                        {physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h
-                      </td>
-                      <td className="py-2 px-3">
-                        OTR ≥ OUR ({isO2Starved ? 'FAIL' : 'PASS'})
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-3 font-sans font-semibold text-slate-900">
-                        Gassed Bulk Mixing Time (t_m)
-                      </td>
-                      <td className="py-2 px-3 text-slate-700">
-                        {baselinePhysics.mixingTimeGassedS.toFixed(1)} s (86% load)
-                      </td>
-                      <td
-                        className={`py-2 px-3 font-bold ${
-                          isMixingSlow ? 'text-rose-700' : 'text-emerald-700'
-                        }`}
-                      >
-                        {physicsResult.mixingTimeGassedS.toFixed(1)} s (
-                        {currentRadarLoads.mixingLoadPct.toFixed(0)}% load)
-                      </td>
-                      <td className="py-2 px-3">
-                        ≤ 60.0 s ({isMixingSlow ? 'FAIL' : 'PASS'})
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-3 font-sans font-semibold text-slate-900">
-                        Impeller Shear Stress (τ_imp)
-                      </td>
-                      <td className="py-2 px-3 text-slate-700">
-                        {baselinePhysics.estimatedShearStressPa.toFixed(2)} Pa
-                      </td>
-                      <td
-                        className={`py-2 px-3 font-bold ${
-                          isShearViolated ? 'text-rose-700' : 'text-emerald-700'
-                        }`}
-                      >
-                        {physicsResult.estimatedShearStressPa.toFixed(2)} Pa (λ_K ={' '}
-                        {physicsResult.kolmogorovScaleUm.toFixed(1)} μm)
-                      </td>
-                      <td className="py-2 px-3">
-                        ≤ {groundedParams.shearThresholdPa} Pa ({isShearViolated ? 'FAIL' : 'PASS'})
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-3 font-sans font-semibold text-slate-900">
-                        Hollow-Fibre Filter ΔP &amp; Laminar Wall Shear
-                      </td>
-                      <td className="py-2 px-3 text-rose-700 font-semibold">
-                        {baselinePhysics.hfPressureDropKpa.toFixed(1)} kPa ·{' '}
-                        {baselinePhysics.hfEffectiveWallShearStressPa.toFixed(2)} Pa (
-                        {baselinePhysics.hfWallShearLoadPct.toFixed(0)}% load — FAIL)
-                      </td>
-                      <td
-                        className={`py-2 px-3 font-bold ${
-                          isFilterViolated ? 'text-rose-700' : 'text-emerald-700'
-                        }`}
-                      >
-                        {physicsResult.hfPressureDropKpa.toFixed(1)} kPa ·{' '}
-                        {physicsResult.hfEffectiveWallShearStressPa.toFixed(2)} Pa (
-                        {currentRadarLoads.filterHydraulicsLoadPct.toFixed(0)}% load)
-                      </td>
-                      <td className="py-2 px-3">
-                        ΔP ≤ {physicsResult.hfPressureDropLimitKpa.toFixed(0)} kPa &amp; τ_w,lumen ≤{' '}
-                        {physicsResult.hfLumenWallShearLimitPa.toFixed(2)} Pa (
-                        {isFilterViolated ? 'FAIL' : 'PASS'})
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-3 font-sans font-semibold text-slate-900">
-                        Gassed Power &amp; Est. COGS/g
-                      </td>
-                      <td className="py-2 px-3 text-slate-700">
-                        {baselinePhysics.specificPowerWPerM3.toFixed(0)} W/m³ ·{' '}
-                        {formatCogsHeadline(downstreamCogs.cogsPerGramUsd)}
-                      </td>
-                      <td className="py-2 px-3 font-bold text-slate-900">
-                        {physicsResult.specificPowerWPerM3.toFixed(0)} W/m³ ·{' '}
-                        {formatCogsHeadline(downstreamCogs.cogsPerGramUsd)}
-                      </td>
-                      <td className="py-2 px-3 text-slate-600">
-                        Synthetic cost basis
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+            {/* Left 7 Cols: Recommended Next Validation Experiments */}
+            <div className="lg:col-span-7 space-y-3">
+              <div className="text-xs font-bold text-slate-900 uppercase font-mono">
+                Recommended Next Experiments ({selectedCandidateCard.modalityLabel})
               </div>
-
-              {/* Remaining Constraints & Scientific Uncertainty Box */}
-              <div className="p-3.5 bg-amber-50/90 border border-amber-300 text-xs text-amber-950 space-y-1.5">
-                <div className="font-mono font-bold uppercase text-[11px] flex items-center gap-1.5">
-                  <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
-                  Remaining Constraints &amp; Scientific Uncertainty Statement
+              {selectedCandidateCard.nextExperiments.map((expText, idx) => (
+                <div
+                  key={idx}
+                  className="p-4 bg-slate-50 border border-slate-200 flex items-start gap-3 text-xs"
+                >
+                  <span className="font-mono font-bold text-blue-700 shrink-0">
+                    0{idx + 1}.
+                  </span>
+                  <p className="text-slate-800 leading-relaxed">{expText}</p>
                 </div>
-                <ul className="list-disc list-inside space-y-1 text-[11px] leading-relaxed">
-                  {!isAllPhysicsFeasible && (
-                    <li className="font-bold text-rose-800">
-                      ACTIVE CONSTRAINT FAILURE: {physicsResult.limitingFactors.join('; ') || 'Oxygen transfer or hydrodynamic limit violated.'} Return to Step 3 and apply a feasible configuration before signing off.
-                    </li>
-                  )}
-                  <li>
-                    <strong>1D Empirical Correlations vs. 3D CFD:</strong> Mass-balance and hydrodynamic predictions use validated 1D scale-up correlations (Van&apos;t Riet 1979; Nienow 1998; Rosseburg et al. 2018), not 3D Navier–Stokes CFD or physical 500 L wet-lab runs.
-                  </li>
-                  <li>
-                    <strong>Uncalibrated Effects Requiring Wet-Lab Data:</strong> Continuous inter-impeller spacing (ΔC/D_i) flow merging and Pluronic/antifoam k_La depression (α_surfactant = 0.55–0.85) require dual-probe conductivity tracer and dynamic gassing-out calibration prior to GMP lock.
-                  </li>
-                </ul>
+              ))}
+
+              <div className="p-4 bg-amber-50/70 border border-amber-200 text-xs text-amber-950 space-y-1">
+                <div className="font-bold">Key Evidence Gap to Close Next:</div>
+                <p>{selectedCandidateCard.missingEvidence}</p>
               </div>
             </div>
 
-            {/* Right 5 Cols: Evidence Summary + Mandatory Human Approval Gate */}
-            <div className="lg:col-span-5 flex flex-col justify-between space-y-3">
-              {/* Concise Evidence Summary */}
-              <div className="bg-slate-50 border border-slate-200 p-3.5 space-y-2">
+            {/* Right 5 Cols: Human-in-the-Loop Safety Gate Sign-Off */}
+            <div className="lg:col-span-5 bg-slate-50 border border-slate-200 p-5 flex flex-col justify-between space-y-4 text-xs">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono font-bold uppercase text-slate-900">
-                    Literature Evidence &amp; Provenance Summary
+                  <span className="font-mono font-bold text-slate-800 uppercase">
+                    Human Safety Gate Sign-Off
                   </span>
-                  <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-blue-100 text-blue-900">
-                    {prismaIncludedCount} PRISMA Records Included
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600">
-                  Every biological and physical parameter is linked to licence-verified open sources (Europe PMC, PubMed, OpenAlex, UniProt, ChEMBL):
-                </p>
-                <div className="space-y-1 text-[11px] font-mono">
-                  {records.slice(0, 3).map((rec) => (
-                    <div
-                      key={rec.id}
-                      className="p-1.5 bg-white border border-slate-200 flex items-center justify-between gap-2"
-                    >
-                      <span className="truncate text-slate-800">
-                        <strong>{rec.source}:</strong> {rec.title}
-                      </span>
-                      <span className="text-[10px] text-slate-500 shrink-0">
-                        {rec.accessionId}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Mandatory Human-in-the-Loop Approval Gate */}
-              <div
-                className={`p-4 border-2 space-y-3 ${
-                  isHumanApproved && isAllPhysicsFeasible
-                    ? 'bg-emerald-50/70 border-emerald-500'
-                    : 'bg-white border-slate-900'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {isHumanApproved && isAllPhysicsFeasible ? (
-                      <ShieldCheck className="w-5 h-5 text-emerald-700 shrink-0" />
-                    ) : (
-                      <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0" />
-                    )}
-                    <div>
-                      <div className="text-xs font-mono font-bold uppercase text-slate-900">
-                        Mandatory Human-in-the-Loop Sign-Off
-                      </div>
-                      <div className="text-[11px] text-slate-600">
-                        No experimental protocol can be exported or executed without human approval.
-                      </div>
-                    </div>
-                  </div>
                   <span
-                    className={`px-2 py-0.5 text-[10px] font-mono font-bold uppercase ${
+                    className={`font-mono font-bold ${
                       isHumanApproved && isAllPhysicsFeasible
-                        ? 'bg-emerald-200 text-emerald-950'
-                        : 'bg-amber-200 text-amber-950'
+                        ? 'text-emerald-700'
+                        : 'text-amber-700'
                     }`}
                   >
                     {isHumanApproved && isAllPhysicsFeasible
-                      ? 'APPROVED (SIMULATED)'
-                      : 'PENDING HUMAN SIGN-OFF'}
+                      ? 'APPROVED'
+                      : 'PENDING SIGN-OFF'}
                   </span>
                 </div>
 
+                <p className="text-slate-600 leading-relaxed">
+                  No candidate synthesis route or 500 L bioreactor operating recipe is released for
+                  wet-lab execution without explicit human investigator review.
+                </p>
+
                 <div>
-                  <label className="block text-[10px] font-mono font-bold text-slate-700 mb-1">
-                    REVIEWER ROLE (SIMULATED DEMO — NO INSTITUTIONAL APPROVAL IMPLIED)
+                  <label className="block font-medium text-slate-700 mb-1">
+                    Reviewer Role (Simulated Demo Reviewer — No Institutional Approval Implied)
                   </label>
                   <input
                     type="text"
                     value={reviewerName}
                     onChange={(e) => setReviewerName(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs font-mono bg-white border border-slate-300 text-slate-900"
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 text-slate-900"
                   />
                 </div>
 
-                {!isAllPhysicsFeasible && (
-                  <div className="p-2.5 bg-rose-100 border border-rose-400 text-rose-950 text-[11px] font-mono font-semibold">
-                    ▲ HARD SAFETY INTERLOCK ACTIVE: Approval is blocked because the current 500 L operating point fails physical constraints (OTR = {physicsResult.otrMmolPerLHour.toFixed(1)} vs OUR = {physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h). Go to Step 3 and apply a feasible configuration first.
+                {effectiveModality === 'mammalian_cho_bioreactor' && !isAllPhysicsFeasible && (
+                  <div className="p-3 bg-rose-50 border border-rose-300 text-rose-900 font-medium">
+                    Safety Interlock Active: Cannot approve 500 L bioreactor sign-off while oxygen
+                    transfer or filter shear constraints are violated. Apply an AI fix in Stage 3 or
+                    4 first.
                   </div>
                 )}
+              </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={!isAllPhysicsFeasible}
-                    onClick={() => {
-                      const note = `Simulated Demo Sign-Off (No Institutional Approval Implied): Verified 500 L oxygen balance closure (OTR = ${physicsResult.otrMmolPerLHour.toFixed(1)} >= OUR = ${physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h), mixing t_m = ${physicsResult.mixingTimeGassedS.toFixed(1)} s, shear τ = ${physicsResult.estimatedShearStressPa.toFixed(2)} Pa, filter ΔP = ${physicsResult.hfPressureDropKpa.toFixed(1)} kPa.`;
-                      onUpdateSafetyGate('gate2_reactor', 'Approved', reviewerName, note);
-                      onUpdateSafetyGate('gate4_protocol', 'Approved', reviewerName, note);
-                      onApproveAllDemoGates();
-                    }}
-                    className={`flex-1 py-2 px-3 text-xs font-mono font-bold flex items-center justify-center gap-1.5 ${
-                      !isAllPhysicsFeasible
-                        ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                        : 'bg-emerald-700 text-white hover:bg-emerald-800 cursor-pointer'
-                    }`}
-                  >
-                    <UserCheck className="w-4 h-4" />
-                    <span>
-                      {!isAllPhysicsFeasible
-                        ? 'Approval Blocked by Safety Interlock'
-                        : 'Approve 500 L Next-Experiment Protocol'}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onUpdateSafetyGate(
-                        'gate4_protocol',
-                        'Changes Requested',
-                        reviewerName,
-                        'Reviewer requested additional wet-lab k_La and mixing-time tracer verification.'
-                      );
-                    }}
-                    className="py-2 px-2.5 text-xs font-mono font-semibold bg-amber-600 text-white hover:bg-amber-700 cursor-pointer"
-                  >
-                    Request Changes
-                  </button>
-                </div>
+              <div className="space-y-2 pt-2 border-t border-slate-200">
+                <button
+                  type="button"
+                  disabled={
+                    effectiveModality === 'mammalian_cho_bioreactor' && !isAllPhysicsFeasible
+                  }
+                  onClick={() => {
+                    onApproveAllDemoGates();
+                    onRunNextExperiment('Constrained BO (EI × P_feas)');
+                  }}
+                  className="w-full py-2 px-3 font-semibold bg-emerald-700 text-white hover:bg-emerald-800 disabled:bg-slate-300 disabled:text-slate-600 cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <UserCheck className="w-4 h-4" />
+                  <span>
+                    {effectiveModality === 'mammalian_cho_bioreactor' && !isAllPhysicsFeasible
+                      ? 'Approval Blocked Until 500 L Bottleneck Resolved'
+                      : 'Approve Candidate & Log Next Experiment'}
+                  </span>
+                </button>
               </div>
             </div>
           </div>
 
-          {/* Expandable Scientific Details */}
-          <div className="border border-slate-200 bg-slate-50">
+          {/* Progressive Disclosure Dropdown: Quantitative Benchmark & Equations */}
+          <div className="pt-3 border-t border-slate-200">
             <button
               type="button"
-              onClick={() => setShowStep4Details((v) => !v)}
-              className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-mono font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+              onClick={() => setShowScientificDetailsDropdown((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 hover:text-slate-950 cursor-pointer"
             >
-              <span className="flex items-center gap-2">
-                <BookOpen className="w-3.5 h-3.5 text-blue-600" />
-                Scientific Details — Full Parameter Provenance Ledger &amp; Epistemic Classification
+              <span>
+                {showScientificDetailsDropdown
+                  ? 'Hide Technical Benchmark, Provenance & Equations'
+                  : 'Show Technical Benchmark (8-Seed BO vs Random Search), Provenance & Equations'}
               </span>
-              {showStep4Details ? (
-                <ChevronUp className="w-4 h-4" />
+              {showScientificDetailsDropdown ? (
+                <ChevronUp className="w-3.5 h-3.5" />
               ) : (
-                <ChevronDown className="w-4 h-4" />
+                <ChevronDown className="w-3.5 h-3.5" />
               )}
             </button>
-            {showStep4Details && (
-              <div className="p-4 border-t border-slate-200 bg-white overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs font-mono">
-                  <thead>
-                    <tr className="bg-slate-100 border-b border-slate-200 text-[11px] text-slate-700">
-                      <th className="py-1.5 px-2.5">Parameter</th>
-                      <th className="py-1.5 px-2.5">Active Value</th>
-                      <th className="py-1.5 px-2.5">Epistemic Class</th>
-                      <th className="py-1.5 px-2.5">Primary Source ID / DOI</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 text-[11px]">
-                    {provenanceLedger.slice(0, 6).map((item) => (
-                      <tr key={item.parameterId}>
-                        <td className="py-1.5 px-2.5 font-bold text-slate-900">
-                          {item.name} ({item.symbol})
-                        </td>
-                        <td className="py-1.5 px-2.5 text-blue-800 font-semibold">
-                          {item.currentValue} {item.unit}
-                        </td>
-                        <td className="py-1.5 px-2.5">
-                          <span className="px-1.5 py-0.5 bg-slate-100 border border-slate-300 text-slate-800">
-                            {item.classification}
-                          </span>
-                        </td>
-                        <td className="py-1.5 px-2.5 text-slate-600">
-                          {item.databaseId} · {item.doiOrUrl}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+
+            {showScientificDetailsDropdown && (
+              <div className="mt-3 p-4 bg-slate-50 border border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-700">
+                <div>
+                  <div className="font-bold text-slate-900">
+                    8-Seed Constrained BO vs. Random Search
+                  </div>
+                  <p className="mt-1 font-mono text-[11px]">
+                    Constrained EI:{' '}
+                    {liveEightSeedSummary.constrainedBoStats.finalScoreMean.toFixed(1)} ±{' '}
+                    {liveEightSeedSummary.constrainedBoStats.finalScoreStd.toFixed(1)} vs. Random:{' '}
+                    {liveEightSeedSummary.randomSearchStats.finalScoreMean.toFixed(1)} ±{' '}
+                    {liveEightSeedSummary.randomSearchStats.finalScoreStd.toFixed(1)} synthetic
+                    units.
+                  </p>
+                </div>
+                <div>
+                  <div className="font-bold text-slate-900">
+                    500 L Before vs. After Physics
+                  </div>
+                  <p className="mt-1 font-mono text-[11px]">
+                    Baseline OTR {baselinePhysics.otrMmolPerLHour.toFixed(1)} → Current OTR{' '}
+                    {physicsResult.otrMmolPerLHour.toFixed(1)} mmol/L/h (Demand OUR{' '}
+                    {physicsResult.ourMmolPerLHour.toFixed(1)}).
+                  </p>
+                </div>
+                <div>
+                  <div className="font-bold text-slate-900">
+                    Literature Provenance &amp; Cost Basis
+                  </div>
+                  <p className="mt-1 font-mono text-[11px]">
+                    {prismaIncludedCount} PRISMA-screened records · Biologic COGS{' '}
+                    {formatCogsHeadline(downstreamCogs.cogsPerGramUsd)} (synthetic cost model).
+                  </p>
+                </div>
               </div>
             )}
           </div>

@@ -5,10 +5,13 @@ import {
   Database,
   FlaskConical,
   Layers,
-  Sparkles,
   Upload,
   ArrowRight,
   RotateCcw,
+  ChevronDown,
+  ChevronUp,
+  ShieldAlert,
+  Sliders,
 } from 'lucide-react';
 import {
   CombinedCandidateAssessment,
@@ -21,6 +24,8 @@ import { BiologicCandidate, CandidatePathwayMode } from '../types/bioreact';
 export interface DrugTargetKnownBinderIntakeState {
   presetId: string;
   pathwayRoute: 'route_a_small_molecule' | 'route_b_biologic';
+  biologicalObjective: string;
+  plainEnglishMechanismNote: string;
   referenceCitation: string;
   referenceAccessionId: string;
   targetProteinSymbol: string;
@@ -50,38 +55,76 @@ export const INITIAL_DRUG_TARGET_PRESETS: Record<
   mrp1_mk571_small_molecule: {
     presetId: 'mrp1_mk571_small_molecule',
     pathwayRoute: 'route_a_small_molecule',
+    biologicalObjective:
+      'Block the MRP1 drug-efflux pump so therapeutic drugs remain inside the cell instead of being pumped out',
+    plainEnglishMechanismNote:
+      'Some cancer cells use proteins such as MRP1 to pump certain drugs out of the cell. Researchers may want to design molecules that inhibit this transport, potentially helping drugs remain inside cells.',
     referenceCitation:
       'Johnson & Chen (Cell, 2017) — Cryo-EM structure of ATP-bound human MRP1 + LTC4 pocket',
     referenceAccessionId: 'DOI: 10.1016/j.cell.2017.01.008 · Europe PMC PMC5582140',
     targetProteinSymbol: 'MRP1 (ABCC1)',
     targetProteinFullName:
-      'Multidrug Resistance-Associated Protein 1 (ATP-Binding Cassette Sub-Family C Member 1)',
+      'Multidrug Resistance-Associated Protein 1 (Drug-Efflux Transporter)',
     targetUniprotId: 'P33527',
     receptorPdbId: '5UJA / 6BHU',
     receptorPocketDescription:
       'Transmembrane Bundle TMD1–TMD2 Bipartite P-Pocket (LYS-332, ARG-1196) & H-Pocket (TRP-1246, PHE-594)',
     pocketCenter: [114.2, 128.6, 96.4],
     pocketSize: [24.0, 24.0, 24.0],
-    knownBinderName: 'MK-571 (Known Competitive MRP1 / LTC4 Pocket Inhibitor)',
+    knownBinderName: 'MK-571 (Known MRP1 Competitive Reference Inhibitor)',
     knownBinderSmiles:
       'CN(C)C(=O)CCS(=O)(=O)c1ccc(cc1)C(SCCC(=O)O)c2cccc(\\C=C\\c3ccc4ccc(Cl)cc4n3)c2',
     knownBinderAffinityKcalMol: -9.1,
-    knownBinderKdOrPotency: 'IC₅₀ = 1.1 μM (Vina Ref −9.10 kcal/mol)',
+    knownBinderKdOrPotency: 'IC₅₀ = 1.1 μM (Docking Ref −9.10 kcal/mol)',
     candidateName: 'R2-Lead-1 (Achiral Biphenyl Sulfonamide Lead)',
     candidateSmiles:
       'O=C(O)c1ccc(-c2ccc(S(=O)(=O)Nc3ccc(Cl)c(C(F)(F)F)c3)cc2)cc1',
     candidateAffinityKcalMol: -10.82,
     activeViewerLigandMode: 'designed_candidate',
   },
+  egfr_osimertinib_small_molecule: {
+    presetId: 'egfr_osimertinib_small_molecule',
+    pathwayRoute: 'route_a_small_molecule',
+    biologicalObjective:
+      'Occupy the mutant EGFR kinase ATP pocket to stop uncontrolled cell-growth signalling',
+    plainEnglishMechanismNote:
+      'Mutant EGFR acts like a stuck growth switch on lung cancer cells. Small-molecule inhibitors are designed to fit inside the intracellular ATP pocket to block phosphorylation.',
+    referenceCitation:
+      'Yosaatmadja et al. (J. Med. Chem., 2015) — EGFR T790M Kinase Domain + Osimertinib Complex',
+    referenceAccessionId: 'ChEMBL3353410 · DrugBank DB09330 · PMID 26203852',
+    targetProteinSymbol: 'EGFR (T790M)',
+    targetProteinFullName:
+      'Epidermal Growth Factor Receptor Tyrosine Kinase Domain',
+    targetUniprotId: 'P00533',
+    receptorPdbId: '4ZAU',
+    receptorPocketDescription:
+      'ATP-Binding Cleft CYS-797 / MET-790 Gatekeeper Pocket',
+    pocketCenter: [114.2, 128.6, 96.4],
+    pocketSize: [20.0, 20.0, 20.0],
+    knownBinderName: 'Osimertinib (AZD9291 · Known Kinase Inhibitor)',
+    knownBinderSmiles:
+      'COc1cc(N(C)CCN(C)C)c(NC(=O)C=C)cc1Nc1nccc(-c2cn(C)c3ccccc23)n1',
+    knownBinderAffinityKcalMol: -9.8,
+    knownBinderKdOrPotency: 'IC₅₀ = 12 nM (Docking Ref −9.80 kcal/mol)',
+    candidateName: 'EGFR-Biaryl-Lead-2 (3-Step Reversible Scaffold)',
+    candidateSmiles:
+      'O=C(O)c1ccc(-c2ccc(S(=O)(=O)Nc3ccc(Cl)c(C(F)(F)F)c3)cc2)cc1',
+    candidateAffinityKcalMol: -10.4,
+    activeViewerLigandMode: 'known_binder',
+  },
   her2_trastuzumab_biologic: {
     presetId: 'her2_trastuzumab_biologic',
     pathwayRoute: 'route_b_biologic',
+    biologicalObjective:
+      'Bind the extracellular surface of HER2 with a monoclonal antibody and manufacture it at 500 L CHO bioreactor scale',
+    plainEnglishMechanismNote:
+      'Unlike small molecules that fit inside an intracellular pocket, Trastuzumab is a 145.5 kDa monoclonal antibody that binds the outside of HER2 and requires living mammalian (CHO) cells to manufacture.',
     referenceCitation:
       'Cho et al. (Nature, 2003) & Aertgeerts et al. (J. Biol. Chem., 2011) — HER2 Ectodomain & Kinase Structure',
     referenceAccessionId: 'DrugBank DB00072 · ChEMBL1201585 · PMID 12589362',
     targetProteinSymbol: 'HER2 (ERBB2)',
     targetProteinFullName:
-      'Receptor Tyrosine-Protein Kinase erbB-2 (Proto-Oncogene Neu / CD340)',
+      'Receptor Tyrosine-Protein Kinase erbB-2 (Extracellular Domain IV)',
     targetUniprotId: 'P04626',
     receptorPdbId: '3PP0 / 1N8Z',
     receptorPocketDescription:
@@ -89,7 +132,7 @@ export const INITIAL_DRUG_TARGET_PRESETS: Record<
     pocketCenter: [16.4, 24.8, 32.1],
     pocketSize: [22.0, 22.0, 22.0],
     knownBinderName:
-      'Trastuzumab (Herceptin · Known IgG1 Biologic Binder) + SYR127063 Kinase Reference',
+      'Trastuzumab (Herceptin · Known IgG1 Biologic) + SYR127063 Reference',
     knownBinderSmiles:
       'Cc1cc(Nc2ncnc3ccc(NC4=NC(C)(C)CO4)cc23)ccc1Oc1ccn2ncnc2c1',
     knownBinderAffinityKcalMol: -9.6,
@@ -104,55 +147,33 @@ export const INITIAL_DRUG_TARGET_PRESETS: Record<
   pd1_pembrolizumab_biologic: {
     presetId: 'pd1_pembrolizumab_biologic',
     pathwayRoute: 'route_b_biologic',
+    biologicalObjective:
+      'Block the PD-1 immune checkpoint receptor with an IgG4 antibody and evaluate mammalian bioreactor production',
+    plainEnglishMechanismNote:
+      'Pembrolizumab is a large 146.3 kDa IgG4 antibody that blocks PD-1 on T-cells. Because of its size and glycosylation, it cannot be made by chemical synthesis and requires mammalian cell culture.',
     referenceCitation:
-      'Tan et al. (Nat. Commun., 2017) & Na et al. (Cell Res., 2017) — Pembrolizumab Fab–PD-1 Complex',
-    referenceAccessionId: 'DrugBank DB09037 · ChEMBL3137343 · PDB 5GGS',
+      'Lee et al. (Nat. Commun., 2016) — Crystal structure of human PD-1 in complex with Pembrolizumab Fab',
+    referenceAccessionId: 'DrugBank DB09037 · PMID 27461440 · Europe PMC PMC4974469',
     targetProteinSymbol: 'PD-1 (PDCD1)',
     targetProteinFullName:
-      'Programmed Cell Death Protein 1 (Immune Checkpoint Receptor CD279)',
+      'Programmed Cell Death Protein 1 (Immune Checkpoint Receptor)',
     targetUniprotId: 'Q15116',
-    receptorPdbId: '5GGS / 5JXE',
+    receptorPdbId: '5GGS',
     receptorPocketDescription:
-      'Extracellular IgV Domain C’D-Loop & FG-Loop Checkpoint Interface (Blocks PD-L1 Binding)',
+      'PD-1 CC’ and FG Loop Extracellular Interface Epitope',
     pocketCenter: [16.4, 24.8, 32.1],
     pocketSize: [22.0, 22.0, 22.0],
-    knownBinderName: 'Pembrolizumab (Keytruda · Known IgG4 S228P Checkpoint Binder)',
+    knownBinderName: 'Pembrolizumab (Keytruda · Known IgG4 Checkpoint Blocker)',
     knownBinderSmiles:
       'Cc1cc(Nc2ncnc3ccc(NC4=NC(C)(C)CO4)cc23)ccc1Oc1ccn2ncnc2c1',
     knownBinderAffinityKcalMol: -9.4,
-    knownBinderKdOrPotency: 'mAb K_D = 29 pM (146.3 kDa IgG4 S228P)',
-    candidateName: 'Pembrolizumab (Keytruda · 146.3 kDa IgG4 mAb)',
+    knownBinderKdOrPotency: 'mAb K_D = 29 pM (146.3 kDa IgG4)',
+    candidateName: 'Pembrolizumab (Keytruda · 146.3 kDa Humanised IgG4 mAb)',
     candidateSmiles:
       'Cc1cc(Nc2ncnc3ccc(NC4=NC(C)(C)CO4)cc23)ccc1Oc1ccn2ncnc2c1',
     candidateAffinityKcalMol: -9.4,
     activeViewerLigandMode: 'known_binder',
     linkedBiologicCandidateId: 'pembrolizumab',
-  },
-  egfr_osimertinib_small_molecule: {
-    presetId: 'egfr_osimertinib_small_molecule',
-    pathwayRoute: 'route_a_small_molecule',
-    referenceCitation:
-      'Yosaatmadja et al. (J. Med. Chem., 2015) — Crystal Structure of EGFR Kinase Domain with AZD9291',
-    referenceAccessionId: 'DOI: 10.1021/acs.jmedchem.5b01146 · ChEMBL3353410 · PDB 4ZAU',
-    targetProteinSymbol: 'EGFR (T790M)',
-    targetProteinFullName:
-      'Epidermal Growth Factor Receptor Tyrosine Kinase (Gatekeeper T790M Mutant)',
-    targetUniprotId: 'P00533',
-    receptorPdbId: '4ZAU',
-    receptorPocketDescription:
-      'ATP-Binding Hinge (MET-793) & Covalent CYS-797 Margin near Gatekeeper MET-790',
-    pocketCenter: [114.2, 128.6, 96.4],
-    pocketSize: [22.0, 22.0, 22.0],
-    knownBinderName: 'Osimertinib / AZD9291 (Known 3rd-Gen EGFR T790M Binder)',
-    knownBinderSmiles:
-      'COc1cc(N(C)CCN(C)C)c(NC(=O)C=C)cc1Nc2nccc(n2)-c3cn(C)c4ccccc34',
-    knownBinderAffinityKcalMol: -9.45,
-    knownBinderKdOrPotency: 'IC₅₀ = 12 nM (Vina −9.45 kcal/mol)',
-    candidateName: 'Achiral Reversible Biaryl-Pyrimidine Lead (Non-Michael Acceptor)',
-    candidateSmiles:
-      'COc1cc(N2CCOCC2)ccc1Nc2nccc(n2)-c3ccc(S(=O)(=O)Nc4ccc(F)cc4)cc3',
-    candidateAffinityKcalMol: -10.15,
-    activeViewerLigandMode: 'known_binder',
   },
 };
 
@@ -177,9 +198,9 @@ export const InitialDrugTargetIntakePanel: React.FC<
   onSelectBiologicCandidate,
   onChangePathwayMode,
   onApplyTo3DViewer,
-  compactMode = false,
 }) => {
-  const [isExpanded, setIsExpanded] = useState<boolean>(true);
+  const [showAdvancedScientific, setShowAdvancedScientific] =
+    useState<boolean>(false);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
 
   // Live Critic Evaluation of Known Binder SMILES and Candidate SMILES
@@ -193,6 +214,30 @@ export const InitialDrugTargetIntakePanel: React.FC<
     [intakeState.candidateSmiles]
   );
 
+  const buildCustomTarget3D = (
+    state: DrugTargetKnownBinderIntakeState
+  ): ProteinTarget3DConfig => {
+    const baseTarget =
+      state.pathwayRoute === 'route_b_biologic' ||
+      state.targetProteinSymbol.toUpperCase().includes('HER2')
+        ? PROTEIN_TARGETS_3D.HER2
+        : PROTEIN_TARGETS_3D.MRP1;
+
+    return {
+      ...baseTarget,
+      id: state.targetProteinSymbol.split(' ')[0] || 'CUSTOM',
+      symbol: state.targetProteinSymbol,
+      fullName: state.targetProteinFullName,
+      pdbId: state.receptorPdbId,
+      uniprotId: state.targetUniprotId,
+      referenceLigandName: state.knownBinderName,
+      referenceLigandSmiles: state.knownBinderSmiles,
+      referenceAffinityKcalMol: state.knownBinderAffinityKcalMol,
+      boxCenter: state.pocketCenter,
+      boxSize: state.pocketSize,
+    };
+  };
+
   const handleSelectPreset = (presetKey: string) => {
     const preset = INITIAL_DRUG_TARGET_PRESETS[presetKey];
     if (!preset) return;
@@ -205,9 +250,10 @@ export const InitialDrugTargetIntakePanel: React.FC<
     } else {
       onChangePathwayMode?.('small_molecule_chemical');
     }
-    onApplyTo3DViewer?.(preset);
+    const target3D = buildCustomTarget3D(preset);
+    onApplyTo3DViewer?.(preset, target3D);
     setStatusBanner(
-      `Loaded preset "${preset.targetProteinSymbol}" with receptor ${preset.receptorPdbId}, reference (${preset.referenceAccessionId.split('·')[0].trim()}), and known binder "${preset.knownBinderName}".`
+      `Loaded "${preset.targetProteinSymbol}" (${preset.receptorPdbId}) and starting molecule "${preset.knownBinderName}" into the 3D viewer and screening pipeline.`
     );
   };
 
@@ -268,31 +314,14 @@ export const InitialDrugTargetIntakePanel: React.FC<
       pocketSize: [sx, sy, sz],
     };
     onUpdateIntakeState(nextState);
+    onApplyTo3DViewer?.(nextState, buildCustomTarget3D(nextState));
     setStatusBanner(
-      `Parsed receptor structure "${file.name}" (${xs.length.toLocaleString()} atoms) → Auto-computed 3D docking box center [${cx}, ${cy}, ${cz}] Å (${sx}×${sy}×${sz} Å).`
+      `Parsed structure "${file.name}" (${xs.length.toLocaleString()} atoms) and updated the 3D binding pocket automatically.`
     );
   };
 
   const handleApplyIntake = () => {
-    const baseTarget =
-      intakeState.pathwayRoute === 'route_b_biologic' ||
-      intakeState.targetProteinSymbol.toUpperCase().includes('HER2')
-        ? PROTEIN_TARGETS_3D.HER2
-        : PROTEIN_TARGETS_3D.MRP1;
-
-    const customTarget: ProteinTarget3DConfig = {
-      ...baseTarget,
-      id: intakeState.targetProteinSymbol.split(' ')[0] || 'CUSTOM',
-      symbol: intakeState.targetProteinSymbol,
-      fullName: intakeState.targetProteinFullName,
-      pdbId: intakeState.receptorPdbId,
-      uniprotId: intakeState.targetUniprotId,
-      referenceLigandName: intakeState.knownBinderName,
-      referenceLigandSmiles: intakeState.knownBinderSmiles,
-      referenceAffinityKcalMol: intakeState.knownBinderAffinityKcalMol,
-      boxCenter: intakeState.pocketCenter,
-      boxSize: intakeState.pocketSize,
-    };
+    const customTarget = buildCustomTarget3D(intakeState);
 
     if (intakeState.pathwayRoute === 'route_b_biologic') {
       onChangePathwayMode?.('established_biologic');
@@ -305,349 +334,492 @@ export const InitialDrugTargetIntakePanel: React.FC<
 
     onApplyTo3DViewer?.(intakeState, customTarget);
     setStatusBanner(
-      `Synchronised 3D Viewer & Route Gate with Target "${intakeState.targetProteinSymbol}" (${intakeState.targetUniprotId}), Receptor PDB "${intakeState.receptorPdbId}", Reference "${intakeState.referenceAccessionId}", and Known Binder "${intakeState.knownBinderName}".`
+      `Updated 3D molecular viewer and manufacturability screening for target "${intakeState.targetProteinSymbol}" and molecule "${
+        intakeState.activeViewerLigandMode === 'known_binder'
+          ? intakeState.knownBinderName
+          : intakeState.candidateName
+      }".`
     );
   };
+
+  const isMrp1Selected = intakeState.targetProteinSymbol
+    .toUpperCase()
+    .includes('MRP1');
 
   return (
     <div className="bg-white border border-slate-300 shadow-xs">
       {/* Header Bar */}
-      <div className="px-4 py-3 bg-slate-900 text-slate-100 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5">
-          <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider bg-cyan-500 text-slate-950">
-            INITIAL DRUG &amp; TARGET INPUT
-          </span>
-          <div>
-            <h2 className="text-xs sm:text-sm font-bold text-white">
-              Configure Candidate Drug via Literature Reference, Target Protein, 3D Receptor &amp; Known Binder
-            </h2>
-            <p className="text-[11px] text-slate-300">
-              Select a verified benchmark preset or enter custom Reference + Target Protein + Receptor (.pdb/PDB ID) + Known Binder (SMILES/mAb) to initialise the 3D pocket &amp; manufacturing route.
-            </p>
+      <div className="px-5 py-4 bg-slate-900 text-slate-100 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-mono uppercase tracking-wider text-cyan-400">
+            01. Start With Your Protein Target &amp; Starting Molecule
           </div>
+          <h2 className="text-base sm:text-lg font-bold text-white mt-0.5">
+            Define the Biological Problem, Known Binder &amp; Evidence
+          </h2>
+          <p className="text-xs text-slate-300 mt-0.5">
+            Choose a validated example below or enter your own target protein, biological goal, starting compound and structure reference. All changes flow directly into the 3D viewer and manufacturability checks below.
+          </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => handleSelectPreset('mrp1_mk571_small_molecule')}
-            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-mono border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 cursor-pointer"
           >
-            <RotateCcw className="w-3 h-3" />
-            Reset Default
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsExpanded((v) => !v)}
-            className="px-2.5 py-1 text-[11px] font-mono font-semibold bg-slate-800 text-cyan-300 border border-slate-700 hover:bg-slate-700 cursor-pointer"
-          >
-            {isExpanded ? 'Collapse Input Form' : 'Expand Input Form'}
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reset to MRP1 Drug-Retention Example</span>
           </button>
         </div>
       </div>
 
-      {isExpanded && (
-        <div className="p-4 space-y-4">
-          {/* 1-Click Benchmark Presets Strip */}
-          <div className="space-y-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[11px] font-mono font-bold uppercase text-slate-700">
-                Quick-Load Validated Target + Receptor + Known Binder Presets:
-              </span>
-              <span className="text-[11px] font-mono text-slate-500">
-                Active Mode:{' '}
-                <strong className="text-slate-900">
-                  {intakeState.pathwayRoute === 'route_a_small_molecule'
-                    ? 'Route A · Small-Molecule Chemical Synthesis'
-                    : 'Route B · Biologic Cell-Culture Bioreactor'}
-                </strong>
-              </span>
+      <div className="p-5 space-y-5">
+        {/* Quick Example Selector Strip */}
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="font-semibold text-slate-800">
+              Choose an example case or customise any field below:
+            </span>
+            <span className="text-slate-600">
+              Determined Manufacturing Route:{' '}
+              <strong className="text-slate-950">
+                {intakeState.pathwayRoute === 'route_a_small_molecule'
+                  ? 'Small-Molecule Chemical Synthesis (No Bioreactor Needed)'
+                  : 'Recombinant Biologic (Mammalian CHO Biomanufacturing)'}
+              </strong>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+            {[
+              {
+                id: 'mrp1_mk571_small_molecule',
+                routeLabel: 'Small-Molecule Discovery · Primary Case',
+                title: 'MRP1 Drug-Efflux Pump + MK-571',
+                sub: 'Keep drug inside cell · PDB 5UJA · Chemical synthesis',
+              },
+              {
+                id: 'egfr_osimertinib_small_molecule',
+                routeLabel: 'Small-Molecule Discovery',
+                title: 'EGFR (T790M) Kinase + Osimertinib',
+                sub: 'Block kinase signalling · PDB 4ZAU · Chemical synthesis',
+              },
+              {
+                id: 'her2_trastuzumab_biologic',
+                routeLabel: 'Biologic Manufacturing Example',
+                title: 'HER2 Receptor + Trastuzumab mAb',
+                sub: '145.5 kDa Antibody · PDB 1N8Z · 500 L CHO Bioreactor',
+              },
+              {
+                id: 'pd1_pembrolizumab_biologic',
+                routeLabel: 'Biologic Manufacturing Example',
+                title: 'PD-1 Checkpoint + Pembrolizumab mAb',
+                sub: '146.3 kDa Antibody · PDB 5GGS · 500 L CHO Bioreactor',
+              },
+            ].map((p) => {
+              const isSelected = intakeState.presetId === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => handleSelectPreset(p.id)}
+                  className={`p-3 text-left border transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'border-blue-600 bg-blue-50/60'
+                      : 'border-slate-200 bg-slate-50/70 hover:bg-slate-100'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1 text-[11px] text-slate-600">
+                    <span className="font-medium text-slate-700">
+                      {p.routeLabel}
+                    </span>
+                    {isSelected && (
+                      <span className="text-blue-700 font-semibold">Selected</span>
+                    )}
+                  </div>
+                  <div className="text-xs font-bold text-slate-900 mt-1">
+                    {p.title}
+                  </div>
+                  <div className="text-[11px] text-slate-600 mt-0.5 truncate">
+                    {p.sub}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Plain-English MRP1 Explanation & Mandatory Docking Guardrail Banner */}
+        <div className="p-4 bg-slate-50 border border-slate-200 grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+          <div className="lg:col-span-7 space-y-1">
+            <div className="text-xs font-bold text-slate-900">
+              Plain-English Biological Goal ({intakeState.targetProteinSymbol})
+            </div>
+            <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+              {isMrp1Selected
+                ? 'Some cancer cells use proteins such as MRP1 to pump certain drugs out of the cell. Researchers may want to design molecules that inhibit this transport, potentially helping drugs remain inside cells.'
+                : intakeState.plainEnglishMechanismNote}
+            </p>
+          </div>
+          <div className="lg:col-span-5 p-3 bg-amber-50/80 border border-amber-200 space-y-1">
+            <div className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+              <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0" />
+              <span>What Docking Can and Cannot Prove</span>
+            </div>
+            <p className="text-xs text-amber-900 leading-relaxed">
+              A molecule fitting into the 3D protein pocket (predicted binding score) is <strong>not proof</strong> that it blocks transporter activity or keeps drugs inside cells. Functional pump inhibition and intracellular drug retention require wet-lab cellular assays.
+            </p>
+          </div>
+        </div>
+
+        {/* 4 Approachable Primary Questions Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* QUESTION 1: Which protein are you targeting? */}
+          <div className="p-4 bg-white border border-slate-200 space-y-3 flex flex-col justify-between">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                <Database className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Which protein are you targeting?</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Target Protein Name or Gene Symbol
+                </label>
+                <input
+                  type="text"
+                  aria-label="Which protein are you targeting"
+                  value={intakeState.targetProteinSymbol}
+                  onChange={(e) => {
+                    const nextState = {
+                      ...intakeState,
+                      presetId: 'custom_user_input',
+                      targetProteinSymbol: e.target.value,
+                    };
+                    onUpdateIntakeState(nextState);
+                    onApplyTo3DViewer?.(nextState, buildCustomTarget3D(nextState));
+                  }}
+                  placeholder="e.g. MRP1 (ABCC1)"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Biological Role in the Cell
+                </label>
+                <input
+                  type="text"
+                  aria-label="Biological role of target protein"
+                  value={intakeState.targetProteinFullName}
+                  onChange={(e) =>
+                    onUpdateIntakeState({
+                      ...intakeState,
+                      presetId: 'custom_user_input',
+                      targetProteinFullName: e.target.value,
+                    })
+                  }
+                  placeholder="e.g. Cell-membrane drug-efflux pump"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 text-slate-900"
+                />
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-              {[
-                {
-                  id: 'mrp1_mk571_small_molecule',
-                  badge: 'Route A · Small Molecule',
-                  title: 'MRP1 (ABCC1) + MK-571 Binder',
-                  sub: 'PDB 5UJA · UniProt P33527 · Ref −9.1 kcal/mol',
-                },
-                {
-                  id: 'her2_trastuzumab_biologic',
-                  badge: 'Route B · Biologic mAb',
-                  title: 'HER2 (ERBB2) + Trastuzumab',
-                  sub: 'PDB 3PP0/1N8Z · UniProt P04626 · DB00072',
-                },
-                {
-                  id: 'pd1_pembrolizumab_biologic',
-                  badge: 'Route B · Biologic mAb',
-                  title: 'PD-1 (PDCD1) + Pembrolizumab',
-                  sub: 'PDB 5GGS · UniProt Q15116 · DB09037',
-                },
-                {
-                  id: 'egfr_osimertinib_small_molecule',
-                  badge: 'Route A · Small Molecule',
-                  title: 'EGFR (T790M) + Osimertinib',
-                  sub: 'PDB 4ZAU · UniProt P00533 · ChEMBL3353410',
-                },
-              ].map((p) => {
-                const isSelected = intakeState.presetId === p.id;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => handleSelectPreset(p.id)}
-                    className={`p-2.5 text-left border transition-colors cursor-pointer ${
-                      isSelected
-                        ? 'border-blue-600 bg-blue-50/70 ring-1 ring-blue-600'
-                        : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1 text-[10px] font-mono">
-                      <span
-                        className={`px-1.5 py-0.5 font-bold ${
-                          p.badge.includes('Route A')
-                            ? 'bg-emerald-100 text-emerald-900'
-                            : 'bg-blue-100 text-blue-900'
-                        }`}
-                      >
-                        {p.badge}
-                      </span>
-                      {isSelected && (
-                        <span className="text-blue-700 font-bold">● Active</span>
-                      )}
-                    </div>
-                    <div className="text-xs font-bold text-slate-900 mt-1">
-                      {p.title}
-                    </div>
-                    <div className="text-[10px] font-mono text-slate-600 truncate">
-                      {p.sub}
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-100">
+              UniProt ID: <span className="font-mono">{intakeState.targetUniprotId}</span>
             </div>
           </div>
 
-          {/* 4-Pillar Input Grid: (1) Reference, (2) Target Protein, (3) Receptor Structure, (4) Known Binder */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* PILLAR 1: LITERATURE / DATABASE REFERENCE */}
-            <div className="p-3 bg-slate-50 border border-slate-200 space-y-2 flex flex-col justify-between">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-1 border-b border-slate-200 pb-1.5">
-                  <span className="text-[11px] font-mono font-bold uppercase text-slate-900 flex items-center gap-1.5">
-                    <BookOpen className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                    1. Reference Source
-                  </span>
-                  <span className="text-[9px] font-mono px-1.5 py-0.5 bg-blue-100 text-blue-900 font-semibold">
-                    DOI / PMID / DB
-                  </span>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                    Primary Literature Citation / Study
-                  </label>
-                  <input
-                    type="text"
-                    aria-label="Primary Literature Citation"
-                    value={intakeState.referenceCitation}
-                    onChange={(e) =>
-                      onUpdateIntakeState({
-                        ...intakeState,
-                        presetId: 'custom_user_input',
-                        referenceCitation: e.target.value,
-                      })
-                    }
-                    placeholder="e.g. Johnson & Chen (Cell 2017)"
-                    className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                    Reference Accession (DOI / PubMed / ChEMBL / DrugBank)
-                  </label>
-                  <input
-                    type="text"
-                    aria-label="Reference Accession ID"
-                    value={intakeState.referenceAccessionId}
-                    onChange={(e) =>
-                      onUpdateIntakeState({
-                        ...intakeState,
-                        presetId: 'custom_user_input',
-                        referenceAccessionId: e.target.value,
-                      })
-                    }
-                    placeholder="e.g. DOI: 10.1016/... or DB00072"
-                    className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
-                  />
-                </div>
+          {/* QUESTION 2: What do you want to change about its behaviour? */}
+          <div className="p-4 bg-white border border-slate-200 space-y-3 flex flex-col justify-between">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                <Sliders className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>What do you want to change about its behaviour?</span>
               </div>
 
-              <div className="text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-200">
-                Grounds parameter provenance &amp; PRISMA audit trail.
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Desired Biological Action
+                </label>
+                <textarea
+                  rows={2}
+                  aria-label="What do you want to change about its behaviour"
+                  value={intakeState.biologicalObjective}
+                  onChange={(e) =>
+                    onUpdateIntakeState({
+                      ...intakeState,
+                      presetId: 'custom_user_input',
+                      biologicalObjective: e.target.value,
+                    })
+                  }
+                  placeholder="e.g. Block the pump so the drug stays inside the cell"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 text-slate-900 resize-none"
+                />
               </div>
-            </div>
 
-            {/* PILLAR 2: TARGET PROTEIN */}
-            <div className="p-3 bg-slate-50 border border-slate-200 space-y-2 flex flex-col justify-between">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-1 border-b border-slate-200 pb-1.5">
-                  <span className="text-[11px] font-mono font-bold uppercase text-slate-900 flex items-center gap-1.5">
-                    <Database className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    2. Target Protein
-                  </span>
-                  <span className="text-[9px] font-mono px-1.5 py-0.5 bg-emerald-100 text-emerald-900 font-semibold">
-                    UniProt: {intakeState.targetUniprotId}
-                  </span>
-                </div>
-
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Candidate Molecule Type
+                </label>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <div>
-                    <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                      Target Symbol
-                    </label>
-                    <input
-                      type="text"
-                      aria-label="Target Protein Symbol"
-                      value={intakeState.targetProteinSymbol}
-                      onChange={(e) =>
-                        onUpdateIntakeState({
-                          ...intakeState,
-                          presetId: 'custom_user_input',
-                          targetProteinSymbol: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. MRP1 (ABCC1)"
-                      className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                      UniProt ID
-                    </label>
-                    <input
-                      type="text"
-                      aria-label="Target UniProt ID"
-                      value={intakeState.targetUniprotId}
-                      onChange={(e) =>
-                        onUpdateIntakeState({
-                          ...intakeState,
-                          presetId: 'custom_user_input',
-                          targetUniprotId: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. P33527"
-                      className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                    Target Protein Name &amp; Modality Route
-                  </label>
-                  <input
-                    type="text"
-                    aria-label="Target Protein Full Name"
-                    value={intakeState.targetProteinFullName}
-                    onChange={(e) =>
-                      onUpdateIntakeState({
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextState: DrugTargetKnownBinderIntakeState = {
                         ...intakeState,
-                        presetId: 'custom_user_input',
-                        targetProteinFullName: e.target.value,
-                      })
-                    }
-                    className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900 mb-1.5"
-                  />
-                  <div className="grid grid-cols-2 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onUpdateIntakeState({
-                          ...intakeState,
-                          pathwayRoute: 'route_a_small_molecule',
-                        });
-                        onChangePathwayMode?.('small_molecule_chemical');
-                      }}
-                      className={`py-1 px-1.5 text-[10px] font-mono border cursor-pointer ${
-                        intakeState.pathwayRoute === 'route_a_small_molecule'
-                          ? 'bg-emerald-700 text-white border-emerald-700 font-bold'
-                          : 'bg-white text-slate-700 border-slate-300'
-                      }`}
-                    >
-                      Route A: Small Mol
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onUpdateIntakeState({
-                          ...intakeState,
-                          pathwayRoute: 'route_b_biologic',
-                        });
-                        onChangePathwayMode?.('established_biologic');
-                      }}
-                      className={`py-1 px-1.5 text-[10px] font-mono border cursor-pointer ${
-                        intakeState.pathwayRoute === 'route_b_biologic'
-                          ? 'bg-blue-700 text-white border-blue-700 font-bold'
-                          : 'bg-white text-slate-700 border-slate-300'
-                      }`}
-                    >
-                      Route B: Biologic
-                    </button>
-                  </div>
+                        pathwayRoute: 'route_a_small_molecule',
+                      };
+                      onUpdateIntakeState(nextState);
+                      onChangePathwayMode?.('small_molecule_chemical');
+                      onApplyTo3DViewer?.(nextState, buildCustomTarget3D(nextState));
+                    }}
+                    className={`py-1.5 px-2 text-xs font-medium border cursor-pointer ${
+                      intakeState.pathwayRoute === 'route_a_small_molecule'
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    Small Molecule
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextState: DrugTargetKnownBinderIntakeState = {
+                        ...intakeState,
+                        pathwayRoute: 'route_b_biologic',
+                      };
+                      onUpdateIntakeState(nextState);
+                      onChangePathwayMode?.('established_biologic');
+                      onApplyTo3DViewer?.(nextState, buildCustomTarget3D(nextState));
+                    }}
+                    className={`py-1.5 px-2 text-xs font-medium border cursor-pointer ${
+                      intakeState.pathwayRoute === 'route_b_biologic'
+                        ? 'bg-blue-700 text-white border-blue-700'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    Biologic Protein
+                  </button>
                 </div>
-              </div>
-
-              <div className="text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-200">
-                Distinguishes target antigen/receptor from therapeutic drug.
               </div>
             </div>
 
-            {/* PILLAR 3: 3D RECEPTOR STRUCTURE & POCKET */}
-            <div className="p-3 bg-slate-50 border border-slate-200 space-y-2 flex flex-col justify-between">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-1 border-b border-slate-200 pb-1.5">
-                  <span className="text-[11px] font-mono font-bold uppercase text-slate-900 flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                    3. Receptor Structure
-                  </span>
-                  <span className="text-[9px] font-mono px-1.5 py-0.5 bg-indigo-100 text-indigo-900 font-semibold">
-                    PDB: {intakeState.receptorPdbId}
-                  </span>
-                </div>
+            <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-100">
+              Determines whether chemical synthesis or cell culture applies.
+            </div>
+          </div>
 
+          {/* QUESTION 3: Do you have a known molecule to start from? */}
+          <div className="p-4 bg-white border border-slate-200 space-y-3 flex flex-col justify-between">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                <FlaskConical className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Do you have a known molecule to start from?</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Known Binder or Reference Compound
+                </label>
+                <input
+                  type="text"
+                  aria-label="Do you have a known molecule to start from"
+                  value={intakeState.knownBinderName}
+                  onChange={(e) => {
+                    const nextState = {
+                      ...intakeState,
+                      presetId: 'custom_user_input',
+                      knownBinderName: e.target.value,
+                    };
+                    onUpdateIntakeState(nextState);
+                    onApplyTo3DViewer?.(nextState, buildCustomTarget3D(nextState));
+                  }}
+                  placeholder="e.g. MK-571 (reference inhibitor)"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Show in 3D Pocket Viewer Below
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextState: DrugTargetKnownBinderIntakeState = {
+                        ...intakeState,
+                        activeViewerLigandMode: 'known_binder',
+                      };
+                      onUpdateIntakeState(nextState);
+                      onApplyTo3DViewer?.(nextState, buildCustomTarget3D(nextState));
+                    }}
+                    className={`py-1.5 px-2 text-xs font-medium border cursor-pointer ${
+                      intakeState.activeViewerLigandMode === 'known_binder'
+                        ? 'bg-amber-600 text-white border-amber-600'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    Known Binder
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextState: DrugTargetKnownBinderIntakeState = {
+                        ...intakeState,
+                        activeViewerLigandMode: 'designed_candidate',
+                      };
+                      onUpdateIntakeState(nextState);
+                      onApplyTo3DViewer?.(nextState, buildCustomTarget3D(nextState));
+                    }}
+                    className={`py-1.5 px-2 text-xs font-medium border cursor-pointer ${
+                      intakeState.activeViewerLigandMode === 'designed_candidate'
+                        ? 'bg-emerald-700 text-white border-emerald-700'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    New Candidate
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-100">
+              Starting benchmark: <span className="font-mono">{intakeState.knownBinderKdOrPotency}</span>
+            </div>
+          </div>
+
+          {/* QUESTION 4: Do you have a protein structure or research reference? */}
+          <div className="p-4 bg-white border border-slate-200 space-y-3 flex flex-col justify-between">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                <Layers className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>Do you have a protein structure or research reference?</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5">
                 <div>
-                  <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                    Receptor PDB ID / Cryo-EM or Crystal Structure
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    PDB Structure ID
                   </label>
                   <input
                     type="text"
-                    aria-label="Receptor PDB ID"
+                    aria-label="PDB Structure ID"
                     value={intakeState.receptorPdbId}
-                    onChange={(e) =>
-                      onUpdateIntakeState({
+                    onChange={(e) => {
+                      const nextState = {
                         ...intakeState,
                         presetId: 'custom_user_input',
                         receptorPdbId: e.target.value,
-                      })
-                    }
-                    placeholder="e.g. 5UJA / 3PP0"
-                    className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
+                      };
+                      onUpdateIntakeState(nextState);
+                      onApplyTo3DViewer?.(nextState, buildCustomTarget3D(nextState));
+                    }}
+                    placeholder="e.g. 5UJA"
+                    className="w-full px-2 py-1.5 text-xs font-mono bg-white border border-slate-300 text-slate-900"
                   />
                 </div>
-
                 <div>
-                  <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                    Binding Pocket / Epitope Coordinates (x, y, z Å)
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Or Upload .pdb
                   </label>
-                  <div className="grid grid-cols-3 gap-1">
-                    {[0, 1, 2].map((axisIdx) => (
+                  <label className="flex items-center justify-center gap-1 w-full py-1.5 px-2 text-xs bg-slate-50 border border-dashed border-slate-400 text-slate-700 hover:bg-slate-100 cursor-pointer truncate">
+                    <Upload className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span className="truncate">
+                      {intakeState.uploadedReceptorFileName || 'Upload File'}
+                    </span>
+                    <input
+                      type="file"
+                      accept=".pdb,.pdbqt,.ent"
+                      onChange={handleReceptorFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Research Paper or Evidence Source
+                </label>
+                <input
+                  type="text"
+                  aria-label="Research Paper or Evidence Source"
+                  value={intakeState.referenceCitation}
+                  onChange={(e) =>
+                    onUpdateIntakeState({
+                      ...intakeState,
+                      presetId: 'custom_user_input',
+                      referenceCitation: e.target.value,
+                    })
+                  }
+                  placeholder="e.g. Johnson & Chen (Cell, 2017)"
+                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 text-slate-900"
+                />
+              </div>
+            </div>
+
+            <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-100 truncate">
+              Ref: {intakeState.referenceAccessionId}
+            </div>
+          </div>
+        </div>
+
+        {/* Action Strip + Expandable Advanced Scientific Inputs Toggle */}
+        <div className="pt-2 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => setShowAdvancedScientific((v) => !v)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 hover:text-slate-950 cursor-pointer"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+            <span>
+              {showAdvancedScientific
+                ? 'Hide Advanced Scientific Inputs (SMILES, 3D Binding Box Coordinates & Accession IDs)'
+                : 'Show Advanced Scientific Inputs (SMILES, 3D Binding Box Coordinates & Accession IDs)'}
+            </span>
+            {showAdvancedScientific ? (
+              <ChevronUp className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleApplyIntake}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
+          >
+            <span>Update 3D Viewer &amp; Manufacturability Pipeline</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Expandable Advanced Technical Panel (Binding Box, SMILES, Accession IDs, Critic Scores) */}
+        {showAdvancedScientific && (
+          <div className="p-4 bg-slate-50 border border-slate-200 space-y-4">
+            <div className="text-xs font-bold text-slate-900">
+              Advanced Scientific Parameters (3D Docking Box, SMILES &amp; Database Accessions)
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Advanced Col 1: 3D Binding Box Center & Dimensions */}
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-slate-700">
+                  3D Binding-Box Centre Coordinates (x, y, z in Å)
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(['X', 'Y', 'Z'] as const).map((axisLabel, axisIdx) => (
+                    <div key={axisLabel}>
+                      <span className="block text-[10px] font-mono text-slate-500">
+                        Center {axisLabel} (Å)
+                      </span>
                       <input
-                        key={axisIdx}
                         type="number"
                         step="0.1"
-                        aria-label={`Pocket Center Axis ${axisIdx}`}
+                        aria-label={`Pocket Center ${axisLabel}`}
                         value={intakeState.pocketCenter[axisIdx]}
                         onChange={(e) => {
                           const nextCenter: [number, number, number] = [
@@ -660,171 +832,56 @@ export const InitialDrugTargetIntakePanel: React.FC<
                             pocketCenter: nextCenter,
                           });
                         }}
-                        className="w-full px-1.5 py-1 text-[11px] font-mono bg-white border border-slate-300 text-slate-900"
+                        className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
                       />
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
-
-                <div>
-                  <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                    Or Upload Receptor Structure (.pdb / .pdbqt)
-                  </label>
-                  <label className="flex items-center justify-center gap-1.5 w-full py-1 px-2 text-[10px] font-mono bg-white border border-dashed border-slate-400 text-slate-700 hover:bg-slate-100 cursor-pointer">
-                    <Upload className="w-3 h-3 text-indigo-600" />
-                    <span>
-                      {intakeState.uploadedReceptorFileName
-                        ? `${intakeState.uploadedReceptorFileName} (${intakeState.uploadedAtomCount} atoms)`
-                        : 'Upload .pdb / .pdbqt File'}
-                    </span>
-                    <input
-                      type="file"
-                      accept=".pdb,.pdbqt,.ent"
-                      onChange={handleReceptorFileUpload}
-                      className="hidden"
-                    />
-                  </label>
+                <div className="text-[11px] font-mono text-slate-600">
+                  Grid Box Size: {intakeState.pocketSize[0]} × {intakeState.pocketSize[1]} ×{' '}
+                  {intakeState.pocketSize[2]} Å · Pocket: {intakeState.receptorPocketDescription}
                 </div>
               </div>
 
-              <div className="text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-200">
-                Box: {intakeState.pocketSize[0]}×{intakeState.pocketSize[1]}×
-                {intakeState.pocketSize[2]} Å around pocket center.
-              </div>
-            </div>
-
-            {/* PILLAR 4: KNOWN BINDER / REFERENCE LIGAND */}
-            <div className="p-3 bg-slate-50 border border-slate-200 space-y-2 flex flex-col justify-between">
+              {/* Advanced Col 2: Known Binder SMILES & Critic Readout */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between gap-1 border-b border-slate-200 pb-1.5">
-                  <span className="text-[11px] font-mono font-bold uppercase text-slate-900 flex items-center gap-1.5">
-                    <FlaskConical className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                    4. Known Binder
+                <label className="block text-xs font-medium text-slate-700">
+                  Known Binder SMILES &amp; Reference Docking Score (kcal/mol)
+                </label>
+                <input
+                  type="text"
+                  aria-label="Known Binder SMILES"
+                  value={intakeState.knownBinderSmiles}
+                  onChange={(e) =>
+                    onUpdateIntakeState({
+                      ...intakeState,
+                      presetId: 'custom_user_input',
+                      knownBinderSmiles: e.target.value,
+                    })
+                  }
+                  className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
+                />
+                <div className="flex items-center justify-between text-[11px] font-mono text-slate-600">
+                  <span>
+                    Ref Score: {intakeState.knownBinderAffinityKcalMol.toFixed(2)} kcal/mol
                   </span>
-                  <span className="text-[9px] font-mono px-1.5 py-0.5 bg-amber-100 text-amber-900 font-semibold">
-                    {intakeState.knownBinderAffinityKcalMol.toFixed(2)} kcal/mol
+                  <span>
+                    SA: {knownBinderCritic.synthesisability.sa_score} ·{' '}
+                    {knownBinderCritic.synthesisability.stereocentres} chiral · ~
+                    {knownBinderCritic.process_chemistry.estimated_steps} steps
                   </span>
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                    Known Binder / Reference Drug Name
-                  </label>
-                  <input
-                    type="text"
-                    aria-label="Known Binder Name"
-                    value={intakeState.knownBinderName}
-                    onChange={(e) =>
-                      onUpdateIntakeState({
-                        ...intakeState,
-                        presetId: 'custom_user_input',
-                        knownBinderName: e.target.value,
-                      })
-                    }
-                    placeholder="e.g. MK-571 or Trastuzumab"
-                    className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                    Known Binder SMILES (for 3D Pose &amp; Critic Check)
-                  </label>
-                  <input
-                    type="text"
-                    aria-label="Known Binder SMILES"
-                    value={intakeState.knownBinderSmiles}
-                    onChange={(e) =>
-                      onUpdateIntakeState({
-                        ...intakeState,
-                        presetId: 'custom_user_input',
-                        knownBinderSmiles: e.target.value,
-                      })
-                    }
-                    placeholder="Paste SMILES string..."
-                    className="w-full px-2 py-1 text-[11px] font-mono bg-white border border-slate-300 text-slate-900"
-                  />
-                </div>
-
+              {/* Advanced Col 3: Designed Candidate SMILES & Accession IDs */}
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-slate-700">
+                  Designed Candidate Name &amp; SMILES (Live Chemistry Critic)
+                </label>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <div>
-                    <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                      Ref Vina (kcal/mol)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      aria-label="Known Binder Reference Affinity"
-                      value={intakeState.knownBinderAffinityKcalMol}
-                      onChange={(e) =>
-                        onUpdateIntakeState({
-                          ...intakeState,
-                          presetId: 'custom_user_input',
-                          knownBinderAffinityKcalMol: Number(e.target.value) || -9.0,
-                        })
-                      }
-                      className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-mono font-semibold text-slate-600 mb-0.5">
-                      3D Pose Shown
-                    </label>
-                    <select
-                      aria-label="Active 3D Pose Selection"
-                      value={intakeState.activeViewerLigandMode}
-                      onChange={(e) => {
-                        const nextMode = e.target.value as
-                          | 'known_binder'
-                          | 'designed_candidate';
-                        const next = {
-                          ...intakeState,
-                          activeViewerLigandMode: nextMode,
-                        };
-                        onUpdateIntakeState(next);
-                        onApplyTo3DViewer?.(next);
-                      }}
-                      className="w-full px-1.5 py-1 text-[11px] font-mono bg-white border border-slate-300 text-slate-900"
-                    >
-                      <option value="known_binder">Known Binder</option>
-                      <option value="designed_candidate">Lead Candidate</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="text-[10px] font-mono text-slate-600 pt-1 border-t border-slate-200 flex items-center justify-between">
-                <span>
-                  SA: {knownBinderCritic.synthesisability.sa_score} ·{' '}
-                  {knownBinderCritic.synthesisability.stereocentres} stereo · ~
-                  {knownBinderCritic.process_chemistry.estimated_steps} steps
-                </span>
-                <span
-                  className={`px-1 font-bold uppercase ${
-                    knownBinderCritic.overall_verdict === 'pass'
-                      ? 'text-emerald-700'
-                      : knownBinderCritic.overall_verdict === 'flag'
-                      ? 'text-amber-700'
-                      : 'text-rose-700'
-                  }`}
-                >
-                  {knownBinderCritic.overall_verdict}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Bar: Designed / Evaluative Drug Input + Apply to 3D Viewer Button */}
-          {!compactMode && (
-            <div className="p-3 bg-slate-100 border border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-              <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <div>
-                  <label className="block text-[10px] font-mono font-bold text-slate-700">
-                    Candidate Drug / Lead Name (Compared vs. Known Binder)
-                  </label>
                   <input
                     type="text"
-                    aria-label="Candidate Drug Name"
+                    aria-label="Candidate Name"
                     value={intakeState.candidateName}
                     onChange={(e) =>
                       onUpdateIntakeState({
@@ -833,76 +890,59 @@ export const InitialDrugTargetIntakePanel: React.FC<
                         candidateName: e.target.value,
                       })
                     }
-                    className="w-full mt-0.5 px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
+                    className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
                   />
-                </div>
-                <div className="sm:col-span-2">
-                  <div className="flex items-center justify-between text-[10px] font-mono">
-                    <span className="font-bold text-slate-700">
-                      Candidate SMILES (or Active Scaffold)
-                    </span>
-                    <span className="text-slate-600">
-                      Critic:{' '}
-                      <strong
-                        className={
-                          candidateCritic.overall_verdict === 'pass'
-                            ? 'text-emerald-700'
-                            : candidateCritic.overall_verdict === 'flag'
-                            ? 'text-amber-700'
-                            : 'text-rose-700'
-                        }
-                      >
-                        {candidateCritic.summary}
-                      </strong>
-                    </span>
-                  </div>
                   <input
                     type="text"
-                    aria-label="Candidate Drug SMILES"
-                    value={intakeState.candidateSmiles}
+                    aria-label="Reference Accession ID"
+                    value={intakeState.referenceAccessionId}
                     onChange={(e) =>
                       onUpdateIntakeState({
                         ...intakeState,
                         presetId: 'custom_user_input',
-                        candidateSmiles: e.target.value,
+                        referenceAccessionId: e.target.value,
                       })
                     }
-                    className="w-full mt-0.5 px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
+                    className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
                   />
                 </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleApplyIntake}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-mono font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer shadow-xs"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Load Target, Receptor &amp; Known Binder into 3D Pocket</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+                <input
+                  type="text"
+                  aria-label="Candidate SMILES"
+                  value={intakeState.candidateSmiles}
+                  onChange={(e) =>
+                    onUpdateIntakeState({
+                      ...intakeState,
+                      presetId: 'custom_user_input',
+                      candidateSmiles: e.target.value,
+                    })
+                  }
+                  className="w-full px-2 py-1 text-xs font-mono bg-white border border-slate-300 text-slate-900"
+                />
+                <div className="text-[11px] font-mono text-slate-700">
+                  Candidate Critic: <strong>{candidateCritic.summary}</strong>
+                </div>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {statusBanner && (
-            <div className="px-3 py-2 bg-emerald-50 border border-emerald-300 text-xs font-mono text-emerald-950 flex items-center justify-between gap-2">
-              <span className="flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{statusBanner}</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setStatusBanner(null)}
-                className="text-[10px] underline cursor-pointer shrink-0"
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+        {statusBanner && (
+          <div className="px-3.5 py-2.5 bg-emerald-50 border border-emerald-300 text-xs text-emerald-950 flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{statusBanner}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setStatusBanner(null)}
+              className="text-xs underline cursor-pointer shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

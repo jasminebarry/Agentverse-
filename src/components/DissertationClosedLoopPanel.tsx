@@ -31,7 +31,11 @@ import {
   Terminal,
 } from 'lucide-react';
 
+import { DrugTargetKnownBinderIntakeState } from './InitialDrugTargetIntakePanel';
+
 interface DissertationClosedLoopPanelProps {
+  sharedIntakeState?: DrugTargetKnownBinderIntakeState;
+  sharedCustomTarget3D?: ProteinTarget3DConfig | null;
   onSendTargetToBioprocess?: (targetSymbol: string, uniprotId: string) => void;
   onRouteSmallMoleculeToGate?: () => void;
 }
@@ -168,6 +172,8 @@ const Molecule2DSvg: React.FC<{ smiles: string; verdict: CriticVerdict }> = ({
 };
 
 export const DissertationClosedLoopPanel: React.FC<DissertationClosedLoopPanelProps> = ({
+  sharedIntakeState,
+  sharedCustomTarget3D,
   onSendTargetToBioprocess,
   onRouteSmallMoleculeToGate,
 }) => {
@@ -183,11 +189,14 @@ export const DissertationClosedLoopPanel: React.FC<DissertationClosedLoopPanelPr
   );
 
   const activeTarget: ProteinTarget3DConfig = useMemo(() => {
+    if (sharedCustomTarget3D) {
+      return sharedCustomTarget3D;
+    }
     if (selectedTargetId === 'CUSTOM' && customTargetConfig) {
       return customTargetConfig;
     }
     return PROTEIN_TARGETS_3D[selectedTargetId] || PROTEIN_TARGETS_3D.MRP1;
-  }, [selectedTargetId, customTargetConfig]);
+  }, [sharedCustomTarget3D, selectedTargetId, customTargetConfig]);
 
   // Run mode selector
   const [runMode, setRunMode] = useState<'cache' | 'gate_first'>('cache');
@@ -195,7 +204,10 @@ export const DissertationClosedLoopPanel: React.FC<DissertationClosedLoopPanelPr
 
   // Selected Candidate SMILES for the 3D PyMOL Viewer
   const [selectedSmiles, setSelectedSmiles] = useState<string>(
-    'O=C(O)c1ccc(-c2ccc(S(=O)(=O)Nc3ccc(Cl)c(C(F)(F)F)c3)cc2)cc1'
+    sharedIntakeState?.activeViewerLigandMode === 'known_binder'
+      ? sharedIntakeState.knownBinderSmiles
+      : sharedIntakeState?.candidateSmiles ||
+          'O=C(O)c1ccc(-c2ccc(S(=O)(=O)Nc3ccc(Cl)c(C(F)(F)F)c3)cc2)cc1'
   );
   const [selectedPoseMode, setSelectedPoseMode] = useState<number>(1);
 
@@ -224,8 +236,28 @@ export const DissertationClosedLoopPanel: React.FC<DissertationClosedLoopPanelPr
 
   // Critic Sandbox Live SMILES Evaluator
   const [sandboxSmiles, setSandboxSmiles] = useState<string>(
-    'O=C(O)c1ccc(-c2ccc(S(=O)(=O)Nc3ccc(Cl)c(C(F)(F)F)c3)cc2)cc1'
+    sharedIntakeState?.candidateSmiles ||
+      'O=C(O)c1ccc(-c2ccc(S(=O)(=O)Nc3ccc(Cl)c(C(F)(F)F)c3)cc2)cc1'
   );
+
+  // Keep in sync when sharedIntakeState changes from Workbench Home or Guided Demo
+  useEffect(() => {
+    if (!sharedIntakeState) return;
+    if (sharedIntakeState.targetProteinSymbol.toUpperCase().includes('HER2')) {
+      setSelectedTargetId('HER2');
+    } else if (sharedIntakeState.targetProteinSymbol.toUpperCase().includes('MRP1')) {
+      setSelectedTargetId('MRP1');
+    }
+    const nextSmiles =
+      sharedIntakeState.activeViewerLigandMode === 'known_binder'
+        ? sharedIntakeState.knownBinderSmiles
+        : sharedIntakeState.candidateSmiles;
+    if (nextSmiles) {
+      setSelectedSmiles(nextSmiles);
+      setSandboxSmiles(nextSmiles);
+    }
+  }, [sharedIntakeState]);
+
   const sandboxAssessment: CombinedCandidateAssessment = useMemo(
     () => evaluateSmilesWithCritics(sandboxSmiles),
     [sandboxSmiles]

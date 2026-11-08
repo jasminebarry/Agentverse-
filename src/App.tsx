@@ -71,6 +71,11 @@ import {
 } from './components/UnifiedWorkbenchHomePanel';
 import { GuidedDemoModePanel } from './components/GuidedDemoModePanel';
 import {
+  DrugTargetKnownBinderIntakeState,
+  INITIAL_DRUG_TARGET_PRESETS,
+} from './components/InitialDrugTargetIntakePanel';
+import { ProteinTarget3DConfig } from './data/dissertationDockingData';
+import {
   ALL_PLATFORM_REACTORS,
   ORGANISM_PROCESS_MODELS,
   screenReactorsForOrganism,
@@ -88,15 +93,21 @@ type ActiveSection = WorkbenchSectionId;
 
 export default function App() {
   const [appViewMode, setAppViewMode] = useState<'guided_demo' | 'research_workbench'>(
-    'guided_demo'
+    'research_workbench'
   );
   const [activeSection, setActiveSection] = useState<ActiveSection>('home_workbench');
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>('trastuzumab');
   const [offlineFixtureMode, setOfflineFixtureMode] = useState<boolean>(false);
 
-  // Dual Candidate Pathway State (Established Benchmark vs Research-Stage Novel Dissertation Protein)
+  // Shared Candidate-Centred Discovery-to-Manufacturing State (MRP1 + MK-571 default)
+  const [intakeState, setIntakeState] = useState<DrugTargetKnownBinderIntakeState>(
+    () => INITIAL_DRUG_TARGET_PRESETS.mrp1_mk571_small_molecule
+  );
+  const [customTarget3D, setCustomTarget3D] = useState<ProteinTarget3DConfig | null>(null);
+
+  // Dual Candidate Pathway State (Starts with candidate-centred small-molecule discovery rather than assuming CHO)
   const [candidatePathwayMode, setCandidatePathwayMode] =
-    useState<CandidatePathwayMode>('established_biologic');
+    useState<CandidatePathwayMode>('small_molecule_chemical');
   const [selectedOrganismId, setSelectedOrganismId] =
     useState<OrganismSystemId>('cho_mammalian');
   const [novelProfile, setNovelProfile] = useState<NovelProteinDissertationProfile>(
@@ -1155,7 +1166,7 @@ export default function App() {
         {/* Zone 2: 5 concise single-line text navigation links */}
         <nav className="hidden xl:flex items-center gap-5 text-sm font-medium text-slate-600">
           <a
-            href="#workbench-home"
+            href="#discover"
             onClick={(e) => {
               e.preventDefault();
               setAppViewMode('research_workbench');
@@ -1167,47 +1178,44 @@ export default function App() {
                 : 'border-transparent hover:text-slate-900'
             }`}
           >
-            Workbench Home
+            Discover
           </a>
           <a
-            href="#dissertation-3d"
+            href="#evaluate"
             onClick={(e) => {
               e.preventDefault();
               setAppViewMode('research_workbench');
-              setCandidatePathwayMode('small_molecule_chemical');
               setActiveSection('dissertation_3d');
             }}
             className={`transition-colors whitespace-nowrap shrink-0 py-1 border-b-2 ${
-              appViewMode === 'research_workbench' && activeSection === 'dissertation_3d'
+              appViewMode === 'research_workbench' &&
+              (activeSection === 'dissertation_3d' || activeSection === 'streams')
                 ? 'text-blue-600 border-blue-600 font-semibold'
                 : 'border-transparent hover:text-slate-900'
             }`}
           >
-            Molecular Design (Route A)
+            Evaluate
           </a>
           <a
-            href="#screening"
+            href="#manufacture"
             onClick={(e) => {
               e.preventDefault();
               setAppViewMode('research_workbench');
-              if (candidatePathwayMode === 'small_molecule_chemical') {
-                setCandidatePathwayMode('established_biologic');
-              }
-              setActiveSection('screening');
+              setActiveSection(
+                candidatePathwayMode === 'established_biologic' ? 'mass_balance' : 'screening'
+              );
             }}
             className={`transition-colors whitespace-nowrap shrink-0 py-1 border-b-2 ${
               appViewMode === 'research_workbench' &&
-              (activeSection === 'screening' ||
-                activeSection === 'streams' ||
-                activeSection === 'mass_balance')
+              (activeSection === 'screening' || activeSection === 'mass_balance')
                 ? 'text-blue-600 border-blue-600 font-semibold'
                 : 'border-transparent hover:text-slate-900'
             }`}
           >
-            Biomanufacturing (Route B)
+            Manufacture
           </a>
           <a
-            href="#optimiser"
+            href="#optimise"
             onClick={(e) => {
               e.preventDefault();
               setAppViewMode('research_workbench');
@@ -1219,10 +1227,10 @@ export default function App() {
                 : 'border-transparent hover:text-slate-900'
             }`}
           >
-            Next Experiments
+            Optimise
           </a>
           <a
-            href="#workflow-safety"
+            href="#next-experiments"
             onClick={(e) => {
               e.preventDefault();
               setAppViewMode('research_workbench');
@@ -1235,7 +1243,7 @@ export default function App() {
                 : 'border-transparent hover:text-slate-900'
             }`}
           >
-            Workflow &amp; Safety
+            Next Experiments
           </a>
         </nav>
 
@@ -1255,11 +1263,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* Clean Grouped Workbench Module Bar (Shown in Research Workbench Mode) */}
+      {/* Clean Unified Workbench Bar (Shown in Research Workbench Mode) */}
       {appViewMode === 'research_workbench' && (
         <div className="bg-white border-b border-slate-200 px-6 py-2.5">
           <div className="max-w-[1400px] mx-auto space-y-2">
-            {/* Row 1: Pathway & Active Case Switcher */}
+            {/* Row 1: Unified Candidate Switcher */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2 pb-2 border-b border-slate-100 text-xs">
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -1271,45 +1279,47 @@ export default function App() {
                       : 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
                   }`}
                 >
-                  0. Workbench Overview &amp; 3D Launchpad
+                  Discover &amp; 3D Launchpad
                 </button>
                 <span className="text-slate-300 hidden sm:inline">|</span>
-                <span className="font-mono text-[11px] text-slate-500">ACTIVE CASE:</span>
+                <span className="font-mono text-[11px] text-slate-500">ACTIVE CANDIDATE:</span>
                 <button
                   type="button"
                   onClick={() => {
+                    setIntakeState(INITIAL_DRUG_TARGET_PRESETS.mrp1_mk571_small_molecule);
+                    setCustomTarget3D(null);
                     setCandidatePathwayMode('small_molecule_chemical');
-                    setActiveSection('dissertation_3d');
                   }}
                   className={`px-2 py-0.5 font-mono text-[11px] border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                    activeSection === 'dissertation_3d' ||
                     candidatePathwayMode === 'small_molecule_chemical'
-                      ? 'bg-amber-50 text-amber-950 border-amber-400 font-semibold'
+                      ? 'bg-emerald-50 text-emerald-950 border-emerald-400 font-semibold'
                       : 'bg-white text-slate-600 border-slate-200 hover:text-slate-900'
                   }`}
                 >
-                  Route A · MRP1 Small Molecule (−10.82 kcal/mol)
+                  MRP1 · R2-Lead-1 (Small Molecule · −10.82 kcal/mol)
                 </button>
                 {BIOLOGIC_CANDIDATES.map((cand) => (
                   <button
                     key={cand.id}
                     type="button"
                     onClick={() => {
+                      setIntakeState(
+                        cand.id === 'pembrolizumab'
+                          ? INITIAL_DRUG_TARGET_PRESETS.pd1_pembrolizumab_biologic
+                          : INITIAL_DRUG_TARGET_PRESETS.her2_trastuzumab_biologic
+                      );
+                      setCustomTarget3D(null);
                       setCandidatePathwayMode('established_biologic');
                       handleSelectCandidate(cand.id);
-                      if (activeSection === 'dissertation_3d') {
-                        setActiveSection('streams');
-                      }
                     }}
                     className={`px-2 py-0.5 font-mono text-[11px] border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                      activeSection !== 'dissertation_3d' &&
                       candidatePathwayMode === 'established_biologic' &&
                       cand.id === selectedCandidateId
                         ? 'bg-blue-50 text-blue-950 border-blue-400 font-semibold'
                         : 'bg-white text-slate-600 border-slate-200 hover:text-slate-900'
                     }`}
                   >
-                    Route B · {cand.genericName}
+                    {cand.genericName} (145 kDa Biologic)
                   </button>
                 ))}
                 <button
@@ -1321,17 +1331,27 @@ export default function App() {
                     }
                   }}
                   className={`px-2 py-0.5 font-mono text-[11px] border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                    activeSection !== 'dissertation_3d' &&
                     candidatePathwayMode === 'novel_dissertation_protein'
                       ? 'bg-teal-50 text-teal-950 border-teal-400 font-semibold'
                       : 'bg-white text-slate-600 border-slate-200 hover:text-slate-900'
                   }`}
                 >
-                  Route B · Novel Protein
+                  Novel scFv Fragment (Preliminary)
                 </button>
               </div>
 
               <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-slate-600">
+                <span>
+                  Modality:{' '}
+                  <strong className="text-slate-900">
+                    {candidatePathwayMode === 'small_molecule_chemical'
+                      ? 'Chemical Synthesis'
+                      : candidatePathwayMode === 'established_biologic'
+                      ? 'Mammalian CHO Bioreactor'
+                      : 'Microbial Screening'}
+                  </strong>
+                </span>
+                <span className="text-slate-300">·</span>
                 <span>
                   Safety Gates:{' '}
                   <strong
@@ -1342,68 +1362,57 @@ export default function App() {
                     {approvedGatesCount}/5 Approved
                   </strong>
                 </span>
-                <span className="text-slate-300">·</span>
-                <span>
-                  500 L Oxygen:{' '}
-                  <strong
-                    className={
-                      physicsResult.otrMmolPerLHour >= physicsResult.ourMmolPerLHour
-                        ? 'text-emerald-700'
-                        : 'text-rose-700'
-                    }
-                  >
-                    OTR {physicsResult.otrMmolPerLHour.toFixed(1)} vs OUR{' '}
-                    {physicsResult.ourMmolPerLHour.toFixed(1)} mmol/L/h
-                  </strong>
-                </span>
               </div>
             </div>
 
-            {/* Row 2: The 7 Technical Modules with Clear Route Grouping */}
+            {/* Row 2: Unified Candidate-Centred Modules */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-1.5">
               {(
                 [
                   {
-                    id: 'workflow_safety',
-                    step: 'SHARED GOVERNANCE',
-                    title: '1. Workflow & Safety',
-                    sub: `${approvedGatesCount}/5 Gates Approved`,
-                  },
-                  {
                     id: 'dissertation_3d',
-                    step: 'ROUTE A · MOLECULAR',
-                    title: '2. Molecular Design & Feasibility',
-                    sub: 'Three.js 3D · Docking & Critics',
+                    step: 'EVALUATE · MOLECULAR',
+                    title: '1. Molecular Docking & Critics',
+                    sub: '3D Pocket · SA & Chiral Checks',
                   },
                   {
                     id: 'streams',
-                    step: 'ROUTE B · EVIDENCE',
-                    title: '3. Evidence & Candidate Profile',
-                    sub: `PRISMA (${prisma.recordsIncluded}) · Provenance Audit`,
+                    step: 'EVALUATE · EVIDENCE',
+                    title: '2. Literature & Provenance',
+                    sub: `PRISMA (${prisma.recordsIncluded}) · Audit Ledger`,
                   },
                   {
                     id: 'screening',
-                    step: 'ROUTE GATE & HOSTS',
-                    title: '4. Manufacturing Route & Reactor Screening',
-                    sub: `${isReactorSignedOff ? 'Approved' : 'Provisional'}: ${selectedReactor.shortName}`,
+                    step: 'MANUFACTURE · PATHWAY',
+                    title: '3. Modality, Host & Reactors',
+                    sub:
+                      candidatePathwayMode === 'small_molecule_chemical'
+                        ? 'Chemical Synthesis Route'
+                        : `Host & Reactor: ${selectedReactor.shortName}`,
                   },
                   {
                     id: 'mass_balance',
-                    step: 'ANIMATED BIOREACTOR · 500 L',
-                    title: '5. Engineering Feasibility',
-                    sub: `Interactive Cutaway · OTR/OUR · Shear`,
+                    step: 'MANUFACTURE · FEASIBILITY',
+                    title: '4. Bioreactor & Physics',
+                    sub: `Animated 500 L · OTR/OUR · Shear`,
                   },
                   {
                     id: 'optimiser',
-                    step: 'NEXT EXPERIMENTS',
-                    title: '6. Process Optimisation',
-                    sub: `Constrained BO & Ranked Recipes`,
+                    step: 'OPTIMISE · RECIPES',
+                    title: '5. Process Optimiser',
+                    sub: `Bayesian Optimisation & Trade-offs`,
+                  },
+                  {
+                    id: 'workflow_safety',
+                    step: 'NEXT EXPERIMENTS · GATES',
+                    title: '6. Validation & Safety Gates',
+                    sub: `${approvedGatesCount}/5 Human Gates Approved`,
                   },
                   {
                     id: 'brief',
-                    step: 'SHARED DOSSIER',
-                    title: '7. Results & Recommendations',
-                    sub: `CMC Brief & Export (${formatCogsHeadline(downstreamCogs.cogsPerGramUsd)})`,
+                    step: 'NEXT EXPERIMENTS · DOSSIER',
+                    title: '7. Decision Brief & Export',
+                    sub: `Summary & Export (${formatCogsHeadline(downstreamCogs.cogsPerGramUsd)})`,
                   },
                 ] as const
               ).map((tab) => {
@@ -1449,6 +1458,10 @@ export default function App() {
       <main className="flex-1 max-w-[1400px] w-full mx-auto px-6 py-6 space-y-6">
         {appViewMode === 'guided_demo' ? (
           <GuidedDemoModePanel
+            intakeState={intakeState}
+            onUpdateIntakeState={setIntakeState}
+            customTarget3D={customTarget3D}
+            onUpdateCustomTarget3D={setCustomTarget3D}
             candidate={candidate}
             allBiologicCandidates={BIOLOGIC_CANDIDATES}
             onSelectCandidate={handleSelectCandidate}
@@ -1483,6 +1496,10 @@ export default function App() {
             {/* Unified Workbench Homepage (Default Landing Experience) */}
             {activeSection === 'home_workbench' && (
               <UnifiedWorkbenchHomePanel
+                intakeState={intakeState}
+                onUpdateIntakeState={setIntakeState}
+                customTarget3D={customTarget3D}
+                onUpdateCustomTarget3D={setCustomTarget3D}
                 candidate={candidate}
                 allBiologicCandidates={BIOLOGIC_CANDIDATES}
                 onSelectBiologicCandidate={handleSelectCandidate}
@@ -1728,6 +1745,8 @@ export default function App() {
 
         {activeSection === 'dissertation_3d' && (
           <DissertationClosedLoopPanel
+            sharedIntakeState={intakeState}
+            sharedCustomTarget3D={customTarget3D}
             onRouteSmallMoleculeToGate={() => {
               setCandidatePathwayMode('small_molecule_chemical');
               setActiveSection('screening');
